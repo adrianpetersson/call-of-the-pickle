@@ -1,0 +1,20 @@
+{
+  "name": "call-of-the-pickle",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A lightweight browser arena shooter for small teams",
+  "scripts": {
+    "start": "node server/node.js",
+    "test": "node test/room.test.js",
+    "vendor": "cp node_modules/three/build/three.module.min.js public/vendor/",
+    "cf:dev": "wrangler dev",
+    "cf:deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "three": "^0.170.0"
+  }
+}

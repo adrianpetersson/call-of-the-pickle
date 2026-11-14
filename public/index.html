@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Call of the Pickle</title>
+  <meta name="description" content="A briny little arena shooter for your whole team. Runs in the browser." />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='9' y='2' width='14' height='28' rx='7' fill='%235c982d'/%3E%3Crect x='8' y='7' width='16' height='4' rx='2' fill='%23ff6b4a'/%3E%3Ccircle cx='13' cy='15' r='2.6' fill='%23fff'/%3E%3Ccircle cx='19' cy='15' r='2.6' fill='%23fff'/%3E%3Ccircle cx='13.5' cy='15.3' r='1.2' fill='%23111'/%3E%3Ccircle cx='18.5' cy='15.3' r='1.2' fill='%23111'/%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@700&family=Rubik:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+  <script type="importmap">{ "imports": { "three": "./vendor/three.module.min.js" } }</script>
+</head>
+<body>
+  <canvas id="view"></canvas>
+
+  <!-- in-game overlay -->
+  <div id="hud" class="hidden">
+    <div id="vignette"></div>
+    <div id="hurtflash"></div>
+    <div id="scope"><div class="lens"></div></div>
+    <div id="crosshair"><i class="t"></i><i class="b"></i><i class="l"></i><i class="r"></i><i class="dot"></i></div>
+    <div id="hitmarker"><i></i><i></i><i></i><i></i></div>
+    <div id="arcs"></div>
+    <div id="numbers"></div>
+
+    <div id="top">
+      <div class="chip" id="topA"><span class="lbl"></span><b></b></div>
+      <div id="timer">0:00</div>
+      <div class="chip right" id="topB"><b></b><span class="lbl"></span></div>
+    </div>
+
+    <div id="feed"></div>
+    <div id="toast"><div class="t1"></div><div class="t2"></div></div>
+
+    <div id="chat">
+      <div id="chatlog"></div>
+      <input id="chatin" maxlength="140" placeholder="Say something, then Enter" autocomplete="off" />
+    </div>
+
+    <div id="vitals" class="panel">
+      <div class="row"><span class="icon">✚</span><b id="hpnum">100</b><span id="shieldtag">Shielded</span></div>
+      <div class="bar"><div id="hpbar"></div></div>
+    </div>
+
+    <div id="arsenal" class="panel">
+      <div class="row">
+        <div class="slots"><span id="slot1">1</span><span id="slot2">2</span></div>
+        <span id="wname">Rattler</span>
+      </div>
+      <div class="ammo"><b id="ammonum">30</b><span id="ammores">/ 150</span></div>
+      <div class="bar thin"><div id="reloadbar"></div></div>
+      <div id="nades"><i></i><i></i><i></i><span>G</span></div>
+    </div>
+
+    <div id="ping"></div>
+    <div id="hint">Tab scores · Enter chat · Esc menu</div>
+
+    <div id="death" class="overlay hidden">
+      <div class="card">
+        <div class="eyebrow">Pickled</div>
+        <div class="big" id="deathby"></div>
+        <div class="sub" id="deathwith"></div>
+        <div class="bar"><div id="deathbar"></div></div>
+        <div class="pick" id="deathpick"></div>
+        <div class="tiny">Keys 1–4 change loadout for your next life</div>
+      </div>
+    </div>
+
+    <div id="end" class="overlay hidden">
+      <div class="card wide">
+        <div class="eyebrow">Round over</div>
+        <div class="big" id="endwin"></div>
+        <div id="endrows" class="rows"></div>
+        <div class="sub" id="endnext"></div>
+      </div>
+    </div>
+
+    <div id="board" class="hidden">
+      <div class="card wide">
+        <div class="boardhead"><span id="boardtitle"></span><span id="boardcode"></span></div>
+        <div id="boardrows" class="rows"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- lobby -->
+  <div id="home" class="screen lobby">
+    <div class="lobby-shade"></div>
+
+    <header class="topbar">
+      <div class="wordmark">
+        <svg viewBox="0 0 48 48" aria-hidden="true"><rect x="13" y="3" width="22" height="42" rx="11" fill="#5c982d"/><rect x="22.5" y="6" width="3" height="36" rx="1.5" fill="#86bb3c" opacity=".7"/><rect x="11" y="10" width="26" height="6" rx="3" fill="#ff6b4a"/><circle cx="19" cy="23" r="4.2" fill="#fff"/><circle cx="29" cy="23" r="4.2" fill="#fff"/><circle cx="20" cy="23.5" r="2" fill="#14161a"/><circle cx="28" cy="23.5" r="2" fill="#14161a"/><path d="M15 17.5l7 2.2M33 17.5l-7 2.2" stroke="#2f5a1c" stroke-width="2.4" stroke-linecap="round"/><rect x="20" y="31" width="9" height="2.6" rx="1.3" fill="#5a1f24"/></svg>
+        <div><b>Call of the Pickle</b><span>Modern Brinefare</span></div>
+      </div>
+      <nav class="tabs" role="tablist" aria-label="Lobby sections">
+        <button type="button" role="tab" data-tab="play" aria-selected="true">Play</button>
+        <button type="button" role="tab" data-tab="loadout" aria-selected="false">Loadout</button>
+        <button type="button" role="tab" data-tab="pickle" aria-selected="false">Pickle</button>
+        <button type="button" role="tab" data-tab="controls" aria-selected="false">Controls</button>
+      </nav>
+      <div class="who">
+        <i id="whodot"></i>
+        <div><b id="whoname">Pickle</b><span id="whoroom"></span></div>
+      </div>
+    </header>
+
+    <section class="left">
+      <div class="pane" data-pane="play">
+        <h2>Squad room</h2>
+        <div class="roomrow">
+          <input id="room" maxlength="8" placeholder="CODE" autocomplete="off" spellcheck="false" aria-label="Room code" />
+          <button id="newroom" class="ghost" type="button" title="Make a fresh room code">New code</button>
+        </div>
+        <button id="copylink" class="ghost full" type="button">Copy invite link</button>
+        <div class="opts" id="opts">
+          <h2>Rules</h2>
+          <div class="seg" id="optMode" role="radiogroup" aria-label="Mode"></div>
+          <div class="seg" id="optMap" role="radiogroup" aria-label="Arena"></div>
+          <div class="seg" id="optDur" role="radiogroup" aria-label="Round length"></div>
+        </div>
+        <p class="note">Everyone with the same code lands in the same room. Whoever opens the room sets the rules.</p>
+      </div>
+
+      <div class="pane hidden" data-pane="loadout">
+        <h2>Loadout</h2>
+        <div id="classes" class="classes" role="radiogroup" aria-label="Loadout"></div>
+      </div>
+
+      <div class="pane hidden" data-pane="pickle">
+        <h2>Call sign</h2>
+        <div class="field">
+          <input id="name" maxlength="16" placeholder="Call sign" autocomplete="off" spellcheck="false" />
+        </div>
+        <h2>Headband</h2>
+        <div id="swatches" class="swatches" role="radiogroup" aria-label="Headband colour"></div>
+        <p class="note">Your headband, gloves and sneakers take this colour. In team games they switch to your team's.</p>
+      </div>
+
+      <div class="pane hidden" data-pane="controls">
+        <h2>Controls</h2>
+        <dl class="keys">
+          <div><dt><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></dt><dd>Move</dd></div>
+          <div><dt><kbd>Space</kbd></dt><dd>Jump</dd></div>
+          <div><dt><kbd>LMB</kbd></dt><dd>Fire</dd></div>
+          <div><dt><kbd>RMB</kbd></dt><dd>Aim, scope on the Long Dill</dd></div>
+          <div><dt><kbd>R</kbd></dt><dd>Reload</dd></div>
+          <div><dt><kbd>1</kbd><kbd>2</kbd><kbd>Q</kbd></dt><dd>Swap weapon</dd></div>
+          <div><dt><kbd>G</kbd></dt><dd>Throw a brine bomb</dd></div>
+          <div><dt><kbd>Tab</kbd></dt><dd>Scoreboard</dd></div>
+          <div><dt><kbd>Enter</kbd></dt><dd>Chat</dd></div>
+          <div><dt><kbd>Esc</kbd></dt><dd>Menu and settings</dd></div>
+        </dl>
+      </div>
+      <div id="status" class="status" role="status"></div>
+    </section>
+
+    <aside class="right">
+      <div class="card">
+        <h3>Mission <em>Get pickling</em></h3>
+        <ul>
+          <li>Pickle the other side before they pickle you</li>
+          <li>Brine jars repair you, crates restock ammo</li>
+          <li>Barrels, vats and stalls stop bullets</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>Deployment</h3>
+        <dl class="sum">
+          <div><dt>Loadout</dt><dd id="sumcls"></dd></div>
+          <div><dt>Mode</dt><dd id="summode"></dd></div>
+          <div><dt>Arena</dt><dd id="summap"></dd></div>
+        </dl>
+      </div>
+      <div class="banner">
+        <span>Welcome to</span>
+        <b>Call of the Pickle</b>
+        <p>Free to play, for the whole team. Share the link and jump in.</p>
+      </div>
+    </aside>
+
+    <footer class="bottombar">
+      <button id="play" class="deploy" type="button">
+        <span class="d1">Deploy</span>
+        <span class="d2" id="deploysub"></span>
+      </button>
+      <div class="foot">Up to 16 pickles per room · keyboard and mouse</div>
+    </footer>
+  </div>
+
+  <!-- pause -->
+  <div id="pause" class="screen hidden">
+    <div class="shade dark"></div>
+    <div class="sheet">
+      <div class="sheethead">
+        <div>
+          <div class="eyebrow">Room</div>
+          <div class="code" id="pausecode"></div>
+        </div>
+        <button id="pausecopy" class="ghost" type="button">Copy invite link</button>
+      </div>
+      <button id="resume" class="primary" type="button">Back to the fight</button>
+
+      <h3>Loadout <span>applies on your next life</span></h3>
+      <div id="pauseclasses" class="seg wide"></div>
+
+      <h3>Settings</h3>
+      <label class="slider"><span>Mouse sensitivity</span><input id="sens" type="range" min="0.3" max="3" step="0.05" /><output id="sensv"></output></label>
+      <label class="slider"><span>Volume</span><input id="vol" type="range" min="0" max="1" step="0.05" /><output id="volv"></output></label>
+      <label class="slider"><span>Field of view</span><input id="fov" type="range" min="60" max="105" step="1" /><output id="fovv"></output></label>
+
+      <div id="hostbox">
+        <h3>Room rules <span>you opened this room</span></h3>
+        <div class="seg" id="hostMode"></div>
+        <div class="seg" id="hostMap"></div>
+        <div class="seg" id="hostDur"></div>
+        <button id="hostapply" class="ghost full" type="button">Start a new round with these rules</button>
+      </div>
+
+      <button id="leave" class="ghost danger full" type="button">Leave room</button>
+    </div>
+  </div>
+
+  <div id="touchnote" class="hidden">Call of the Pickle needs a keyboard and mouse. Open it on a laptop or desktop.</div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

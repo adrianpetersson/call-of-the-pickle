@@ -1,0 +1,14 @@
+name = "call-of-the-pickle"
+main = "server/worker.js"
+compatibility_date = "2025-10-01"
+
+[assets]
+directory = "./public"
+
+[[durable_objects.bindings]]
+name = "ROOMS"
+class_name = "GameRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["GameRoom"]
