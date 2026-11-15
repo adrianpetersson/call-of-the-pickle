@@ -3,6 +3,11 @@
 A small browser arena shooter for a team of about ten. Pickle fighters, four loadouts, four
 arenas, free-for-all or two teams. No accounts, no install: everyone opens the same link.
 
+**Play it: https://call-of-the-pickle.call-of-the-pickle.workers.dev**
+
+Press Deploy, then use "Copy invite link" and send it to the others. Everyone with the same room
+code lands in the same game. The link is public, so anyone who has it can play.
+
 ## Play locally
 
 ```bash
@@ -13,7 +18,7 @@ npm install
 npm start
 ```
 
-Open http://localhost:8080 (set `PORT` to change it). Press Play, then send the invite link
+Open http://localhost:8080 (set `PORT` to change it). Press Deploy, then send the invite link
 (or the room code) to the others. People on the same network can join via your machine's IP.
 
 Practice targets for solo testing, while the server runs:
@@ -24,12 +29,17 @@ node test/bots.js ROOMCODE 3 localhost:8080
 
 Useful URL switches: `?r=CODE` joins that room, `?mute` silences the tab.
 
-## Host it for free (Cloudflare Workers)
+## Hosting (Cloudflare Workers, free plan)
+
+The live site above runs on Cloudflare. Pushing to GitHub does not update it; to publish a new
+version, run `npx wrangler deploy` from this folder.
 
 The whole game is static files plus one small WebSocket room per room code. On Cloudflare the
 files are served as Worker assets and each room is a Durable Object (`server/worker.js`,
 `wrangler.toml`). This uses SQLite-backed Durable Objects, which Cloudflare offers on the free
 Workers plan.
+
+To deploy from a machine that is not logged in yet:
 
 ```bash
 npx wrangler login
@@ -39,7 +49,7 @@ npx wrangler login
 npx wrangler deploy
 ```
 
-Wrangler prints the public URL (`https://call-of-the-pickle.<your-subdomain>.workers.dev`). Share that.
+Wrangler prints the public URL when it finishes.
 
 Rough free-plan budget: incoming WebSocket messages are billed at 20 per request against
 100,000 requests a day, and a ten-player half hour sends roughly half a million messages
