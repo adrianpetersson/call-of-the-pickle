@@ -72,6 +72,7 @@ export class Room {
       case 'pi': this.sendTo(conn, { t: 'po', c: m.c }); break;
       case 'cfg': this.onConfig(p, m); break;
       case 'restart': if (p.id === this.hostId()) this.startRound(); break;
+      case 'redeploy': this.onRedeploy(p); break;
       default: break;
     }
   }
@@ -228,6 +229,13 @@ export class Room {
     if (target !== p) { p.k++; p.streak++; }
     this.broadcast({ t: 'kill', k: p.id, v: target.id, w: m.w, h: head, kk: p.k, vd: target.d, st: p.streak });
     this.checkLimit();
+  }
+
+  // A player gives up their current life to come back with another loadout. Costs a death.
+  onRedeploy(p) {
+    if (this.phase !== 'play' || !p.alive) return;
+    p.alive = false; p.hp = 0; p.d++; p.streak = 0; p.respawnAt = Date.now() + RESPAWN_MS;
+    this.broadcast({ t: 'kill', k: p.id, v: p.id, w: 'redeploy', h: 0, kk: p.k, vd: p.d, st: 0 });
   }
 
   onPickup(p, m) {

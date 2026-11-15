@@ -1,6 +1,6 @@
 # Call of the Pickle
 
-A small browser arena shooter for a team of about ten. Pickle fighters, four loadouts, three
+A small browser arena shooter for a team of about ten. Pickle fighters, four loadouts, four
 arenas, free-for-all or two teams. No accounts, no install: everyone opens the same link.
 
 ## Play locally
@@ -70,6 +70,8 @@ it tiny and responsive, and is the right trade for a group of colleagues.
 - Arenas: `public/shared/maps.js`. `b.prop('Barrel', x, z)` places a solid prop (it gets an
   invisible collision box), `b.decor(...)` places decoration, and `scenery` lists the giant
   kitchen items standing outside the walls.
+- Balance: all weapon numbers live in `public/shared/config.js`; `node tools/balance.js` prints
+  shots-to-kill and time-to-kill at several ranges so changes can be checked against numbers.
 - Sound: `tools/build_sfx.sh <sonniss dir> <kenney dir>` cuts the clips in `public/assets/sfx/`
   with ffmpeg from the source recordings (which are not in the repo; see Credits).
 

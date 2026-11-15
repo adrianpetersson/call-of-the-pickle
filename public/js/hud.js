@@ -167,9 +167,10 @@ export class Hud {
     this.c.deathbar = -1;
     if (!d) return;
     const by = $('deathby');
-    by.textContent = d.killer ? `by ${d.killer}` : 'by your own jar';
+    $('death').querySelector('.eyebrow').textContent = d.redeploy ? 'Redeploying' : 'Pickled';
+    by.textContent = d.redeploy ? 'New loadout coming up' : d.killer ? `by ${d.killer}` : 'by your own jar';
     by.style.color = d.killer ? d.css : '';
-    $('deathwith').textContent = d.killer ? `${d.weapon}${d.head ? ' · headshot' : ''}` : 'Stand further back next time';
+    $('deathwith').textContent = d.redeploy ? 'This counts as a death' : d.killer ? `${d.weapon}${d.head ? ' · headshot' : ''}` : 'Stand further back next time';
     this.setDeathClass(d.cls);
   }
   setDeathClass(id) { for (const s of $('deathpick').children) s.classList.toggle('on', s.dataset.id === id); }

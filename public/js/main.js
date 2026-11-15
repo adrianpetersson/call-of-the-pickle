@@ -1,6 +1,7 @@
 // Boot: settings, home screen, pause menu, and joining a room.
 import { loadModels } from './assets.js';
 import { Game } from './game.js';
+import { Carousel } from './carousel.js';
 import { Hud } from './hud.js';
 import { Sound } from './audio.js';
 import { Net } from './net.js';
@@ -78,33 +79,15 @@ COLORS.forEach((hex, i) => {
 function paintSwatches() { [...swatches.children].forEach((b, i) => b.setAttribute('aria-checked', String(i === settings.color))); }
 paintSwatches();
 
-const classes = $('classes');
-CLASSES.forEach((c) => {
-  const b = document.createElement('button');
-  b.type = 'button'; b.className = 'cls'; b.dataset.id = c.id; b.setAttribute('role', 'radio');
-  const ttl = document.createElement('div'); ttl.className = 'ttl';
-  const t = document.createElement('b'); t.textContent = c.title;
-  const wn = document.createElement('span'); wn.textContent = WEAPONS[c.id].name;
-  ttl.append(t, wn);
-  const p = document.createElement('p'); p.textContent = c.blurb;
-  const stats = document.createElement('div'); stats.className = 'stats';
-  c.stats.forEach((v, i) => {
-    const l = document.createElement('span'); l.textContent = STAT_LABELS[i];
-    const bar = document.createElement('i'); bar.style.setProperty('--v', v + '%');
-    stats.append(l, bar);
-  });
-  b.append(ttl, p, stats);
-  b.addEventListener('click', () => { pickClass(c.id); sound.unlock(); sound.play('ui'); });
-  classes.append(b);
-});
-let paintPauseClasses = () => {};
+// loadout pickers: one in the lobby, one in the in-game menu, kept in step
+const lobbyCar = new Carousel($('lobbycar'), (id) => { pickClass(id); sound.unlock(); sound.play('swap'); });
+const pauseCar = new Carousel($('pausecar'), (id) => { pickClass(id); sound.play('swap'); });
 function pickClass(id) {
   settings.cls = id; save();
-  for (const b of classes.children) b.setAttribute('aria-checked', String(b.dataset.id === id));
+  lobbyCar.set(id); pauseCar.set(id);
   game.setPreview(settings.color, id);
   game.setClass(id);
-  paintPauseClasses();
-  if ($('sumcls')) summary();
+  summary();
 }
 
 segmented($('optMode'), modeOpts, () => settings.mode, (v) => { settings.mode = v; save(); summary(); });
@@ -112,9 +95,9 @@ segmented($('optMap'), mapOpts, () => settings.map, (v) => { settings.map = v; s
 segmented($('optDur'), durOpts, () => settings.dur, (v) => { settings.dur = v; save(); summary(); });
 
 // lobby: tabs, the player chip, and the deployment summary
-for (const tab of document.querySelectorAll('.tabs button')) {
+for (const tab of document.querySelectorAll('.topbar .tabs button')) {
   tab.addEventListener('click', () => {
-    for (const t of document.querySelectorAll('.tabs button')) t.setAttribute('aria-selected', String(t === tab));
+    for (const t of document.querySelectorAll('.topbar .tabs button')) t.setAttribute('aria-selected', String(t === tab));
     for (const pane of document.querySelectorAll('.pane')) pane.classList.toggle('hidden', pane.dataset.pane !== tab.dataset.tab);
     sound.unlock(); sound.play('ui');
   });
@@ -175,12 +158,15 @@ let paintHost = [];
 function showPause(on) {
   pause.classList.toggle('hidden', !on);
   if (!on) return;
+  pauseTab('loadout');
+  $('redeploy').disabled = !game.me.alive;       // nothing to give up while already waiting to respawn
   $('pausecode').textContent = game.code;
   refreshHost(true);
 }
 function refreshHost(reset) {
   const mine = game.inRoom && game.hostId === game.me.id;
   $('hostbox').classList.toggle('hidden', !mine);
+  $('guestnote').classList.toggle('hidden', mine);
   if (reset) { host.mode = game.mode; host.map = game.mapIdx; host.dur = game.dur; paintHost.forEach((p) => p()); }
 }
 paintHost = [
@@ -188,9 +174,19 @@ paintHost = [
   segmented($('hostMap'), mapOpts, () => host.map, (v) => { host.map = v; }),
   segmented($('hostDur'), durOpts, () => host.dur, (v) => { host.dur = v; }),
 ];
-paintPauseClasses = segmented($('pauseclasses'), CLASSES.map((c) => ({ v: c.id, label: c.title })), () => settings.cls, (v) => pickClass(v));
 pickClass(settings.cls);
 
+// in-game menu tabs
+function pauseTab(name) {
+  for (const t of document.querySelectorAll('.ptabs button')) t.setAttribute('aria-selected', String(t.dataset.ptab === name));
+  for (const pane of document.querySelectorAll('.ppane')) pane.classList.toggle('hidden', pane.dataset.ppane !== name);
+}
+for (const t of document.querySelectorAll('.ptabs button')) t.addEventListener('click', () => { pauseTab(t.dataset.ptab); sound.play('ui'); });
+
+$('redeploy').addEventListener('click', () => {
+  game.redeploy();
+  if (game.noLock) showPause(false); else game.requestLock();
+});
 $('resume').addEventListener('click', () => { if (game.noLock) showPause(false); else game.requestLock(); });
 $('pausecopy').addEventListener('click', (e) => copy(e.currentTarget, inviteLink(game.code)));
 $('hostapply').addEventListener('click', () => {
@@ -219,8 +215,11 @@ game.onLock = (locked) => {
 };
 game.onRoster = () => { if (!pause.classList.contains('hidden')) refreshHost(false); };
 document.addEventListener('keydown', (e) => {
+  if (!pause.classList.contains('hidden') && (e.code === 'ArrowLeft' || e.code === 'ArrowRight') && e.target.tagName !== 'INPUT') {
+    e.preventDefault(); pauseCar.step(e.code === 'ArrowLeft' ? -1 : 1);
+  }
   if (e.code === 'Escape' && game.inRoom && game.noLock) showPause(pause.classList.contains('hidden'));
 });
 
 if (matchMedia('(pointer: coarse)').matches && !matchMedia('(any-pointer: fine)').matches) $('touchnote').classList.remove('hidden');
-window.__tt = { game, hud, settings, get net() { return net; } };
+window.__tt = { game, hud, settings, lobbyCar, pauseCar, get net() { return net; } };

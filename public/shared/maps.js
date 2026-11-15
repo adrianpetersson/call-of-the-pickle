@@ -225,6 +225,77 @@ function scrapPit() {
   });
 }
 
+// The big one: a brine-drilling rig in a sandy yard, more than twice the floor of the others.
+// A tall three-tier rig in the middle, a raised catwalk spine running east-west through it, long
+// side walkways for sharpshooters, container lanes north and south, and a shed at each base.
+function brineRig() {
+  const b = new Builder(48, 48, 24);
+  b.walls(8, W);
+  // the rig: wide base deck, a second tier, and a mast nobody can climb
+  b.block(20, 20, 8, 8, 4, P);
+  b.stairs(17, 22, 1, 0, 3, 4, S);
+  b.block(22, 22, 4, 4, 8, P);
+  b.stairs(20, 21, 1, 0, 4, 1, S, 4);
+  b.block(23, 23, 2, 2, 15, A);
+  b.block(20, 20, 1, 1, 6, L); b.block(27, 20, 1, 1, 6, L);
+  // catwalk spine from the second tier out to a side tower, with a long stair down
+  b.slab(26, 23, 6, 2, 8, B);
+  b.block(32, 22, 3, 4, 8, T);
+  b.stairs(41, 23, -1, 0, 7, 2, S);
+  // sharpshooter walkway along the side wall
+  b.block(1, 14, 2, 14, 4, P);
+  b.stairs(1, 11, 0, 1, 3, 2, S);
+  b.stairs(1, 30, 0, -1, 3, 2, S);
+  b.block(1, 20, 1, 3, 6, L);
+  // base shed: cinder walls, two doors, steel roof
+  b.block(3, 3, 6, 1, 5, L); b.block(3, 3, 1, 5, 5, L); b.block(8, 3, 1, 2, 5, L); b.block(8, 6, 1, 2, 5, L);
+  b.block(3, 7, 2, 1, 5, L); b.block(7, 7, 2, 1, 5, L);
+  b.slab(3, 3, 6, 5, 6, B);
+  // container lanes
+  b.block(11, 9, 5, 2, 4, T); b.block(18, 5, 2, 5, 4, C2); b.block(26, 8, 5, 2, 4, T);
+  b.block(34, 5, 2, 4, 6, C2); b.block(36, 5, 3, 2, 4, T);
+  b.block(13, 15, 2, 2, 2, C); b.block(22, 13, 2, 2, 2, C); b.block(30, 14, 2, 2, 2, C); b.block(39, 12, 2, 2, 2, C);
+  b.block(8, 17, 2, 2, 4, C); b.block(8, 17, 1, 1, 6, C);
+  // corner yard opposite the shed: raised loading deck and a can silo
+  b.block(40, 2, 6, 4, 3, P);
+  b.stairs(37, 3, 1, 0, 3, 2, S);
+  b.block(43, 7, 2, 2, 12, A);
+  // low cinder walls for crossing the open ground
+  b.block(10, 19, 5, 1, 3, L); b.block(30, 17, 1, 4, 3, L); b.block(16, 13, 1, 4, 3, L); b.block(24, 16, 4, 1, 3, L);
+  b.block(36, 17, 4, 1, 3, L);
+  for (const [x, z] of [[5, 5], [2, 9], [11, 3], [14, 6], [5, 12], [9, 13], [16, 2], [22, 3], [5, 17], [12, 21], [25, 5], [30, 3]]) b.spawn(x, z);
+  b.pickup('hp', 22, 25); b.pickup('ammo', 20, 26);
+  b.pickup('hp', 20, 11); b.pickup('ammo', 36, 14); b.pickup('hp', 4, 22); b.pickup('ammo', 33, 23); b.pickup('ammo', 6, 5); b.pickup('hp', 42, 3);
+  // dressing
+  b.prop('Vat', 40, 8); b.prop('Vat', 13, 4);
+  b.prop('Barrel', 10, 6); b.prop('Barrel', 10, 7); b.prop('Barrel', 21, 16); b.prop('Barrel', 33, 12); b.prop('Barrel', 34, 12);
+  b.prop('Barrel', 28, 20); b.prop('Barrel', 5, 9);
+  b.prop('JarBig', 24, 11); b.prop('JarBig', 16, 18); b.prop('JarBig', 38, 20);
+  b.prop('Crate', 20, 13); b.prop('Crate', 31, 6); b.prop('Crate', 6, 14); b.prop('Crate', 29, 11);
+  b.prop('Stall', 26, 2); b.prop('Stall', 6, 20, 1);
+  b.decor('Sign', 24, 3.2, 1.07, 0);
+  b.decor('SignBrine', 1.07, 3.6, 36, HALF_PI);
+  b.decor('Lamp', 24, 8, 24, 0, false);
+  b.decor('Lamp', 19.5, 2.5, 19.5, HALF_PI); b.decor('Lamp', 9.5, 0.5, 8.6, 0); b.decor('Lamp', 33.5, 4.5, 21.6, Math.PI);
+  b.decor('Lamp', 2.6, 2.5, 14.5, -HALF_PI); b.decor('Lamp', 44.5, 2, 2.6, Math.PI);
+  for (const [x, z] of [[0.5, 8.5], [0.5, 40.5], [12.5, 0.5], [34.5, 0.5]]) b.decor('DillPot', x, 4.5, z);
+  b.decor('DillPot', 4.5, 3.5, 4.5); b.decor('DillPot', 12.5, 2.5, 9.5); b.decor('DillPot', 45.5, 2, 5.5);
+  return b.finish({
+    id: 'rig', name: 'The Rig',
+    kit: { [F]: 'FloorTile', [W]: 'Stone', [P]: 'Steel', [S]: 'Steel', [C]: 'Crate', [A]: 'Can', [B]: 'Steel', [T]: 'Container', [L]: 'Cinder', [C2]: 'Container' },
+    palette: { [F]: 0xdcc694, [W]: 0xcdb27c, [P]: 0x8f9cb0, [S]: 0xa3afc2, [C]: 0xb9824a, [A]: 0xd9583f, [B]: 0x7f8ba0, [T]: 0xb55a36, [L]: 0xc9c3b4, [C2]: 0x3f8f9b },
+    floorAlt: 0xcdb680,
+    sky: { top: 0x3a86c8, bottom: 0xf4e2b8, fog: 0xead9b0, sun: 0xfff1d0, ambient: 0xbfd0e8 },
+    scenery: [
+      { m: 'JarBig', x: -8, y: 0.46, z: 14, s: 10, rot: 0.5 }, { m: 'JarBig', x: 56, y: 0.46, z: 36, s: 9, rot: -2 },
+      { m: 'BottleRed', x: 57, y: 0.46, z: 12, s: 12, rot: -1.3 }, { m: 'BottleYellow', x: -9, y: 0.46, z: 34, s: 12, rot: 1.4 },
+      { m: 'Fork', x: 30, y: 0.46, z: 56, s: 17, rot: Math.PI, tilt: 0.22 }, { m: 'Fork', x: 18, y: 0.46, z: -8, s: 17, rot: 0, tilt: 0.22 },
+      { m: 'Pickle', x: 36, y: 0.46, z: -8, s: 8, rot: Math.PI, c: 4 }, { m: 'Pickle', x: 12, y: 0.46, z: 56, s: 8, rot: 0, c: 0 },
+      { m: 'Pickle', x: 56, y: 0.46, z: 24, s: 7, rot: HALF_PI, c: 7 },
+    ],
+  });
+}
+
 // The lobby backdrop: an alley that repeats every LOBBY_PERIOD cells, so the menu camera can walk
 // down it forever. Never played in.
 export const LOBBY_PERIOD = 16;
@@ -253,4 +324,4 @@ function lobbyAlley() {
 }
 export const LOBBY = lobbyAlley();
 
-export const MAPS = [foundry(), switchyard(), scrapPit()];
+export const MAPS = [foundry(), switchyard(), scrapPit(), brineRig()];

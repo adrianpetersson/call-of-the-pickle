@@ -24,6 +24,35 @@ for (const map of MAPS) {
   }
 }
 
+// --- every spawn and pickup can be walked to ---------------------------------------------------
+// Flood fill over standable surfaces: a step may climb at most 1 unit (a jump) and drop any height.
+for (const map of MAPS) {
+  const solid = (x, y, z) => x < 0 || z < 0 || x >= map.w || z >= map.d || y < 0 || (y < map.h && map.cells[(y * map.d + z) * map.w + x] !== 0);
+  const stand = (x, y, z) => solid(x, y - 1, z) && !solid(x, y, z) && !solid(x, y + 1, z) && !solid(x, y + 2, z);
+  const key = (x, y, z) => (y * map.d + z) * map.w + x;
+  const start = map.spawns[0];
+  const seen = new Set([key(Math.floor(start.x), Math.round(start.y / 0.5), Math.floor(start.z))]);
+  const queue = [[Math.floor(start.x), Math.round(start.y / 0.5), Math.floor(start.z)]];
+  while (queue.length) {
+    const [x, y, z] = queue.pop();
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const nx = x + dx, nz = z + dz;
+      for (let ny = y + 2; ny >= 1; ny--) {
+        if (!stand(nx, ny, nz)) continue;
+        // room to pass: head clearance above the higher of the two surfaces, on both sides
+        const top = Math.max(y, ny);
+        if (solid(x, top + 2, z) || solid(nx, top + 2, nz) || solid(x, top + 1, z) || solid(nx, top + 1, nz)) break;
+        const k = key(nx, ny, nz);
+        if (!seen.has(k)) { seen.add(k); queue.push([nx, ny, nz]); }
+        break;                                   // the first surface found below is where you land
+      }
+    }
+  }
+  for (const p of [...map.spawns, ...map.pickups]) {
+    assert.ok(seen.has(key(Math.floor(p.x), Math.round(p.y / 0.5), Math.floor(p.z))), `${map.id}: cannot walk to ${Math.floor(p.x)},${Math.floor(p.z)} at height ${p.y}`);
+  }
+}
+
 // --- join, spawn, hit, kill ----------------------------------------------------------------
 const room = new Room('TEST');
 const a = conn(), b = conn();
@@ -109,6 +138,17 @@ assert.equal(mate.hp, MAX_HP, 'no friendly fire');
 say(room, c, { t: 'hit', to: foe.id, d: 50, w: 'thumper' });
 assert.equal(foe.hp, MAX_HP - 50);
 assert.ok(WEAPONS.thumper.dmg >= 50);
+
+// --- redeploy: give up a life to change loadout ----------------------------------------------
+const kBefore = pc.k, dBefore = pc.d;
+say(room, c, { t: 'redeploy' });
+assert.equal(pc.alive, false); assert.equal(pc.d, dBefore + 1); assert.equal(pc.k, kBefore);
+assert.equal(c.last('kill').w, 'redeploy');
+say(room, c, { t: 'spawn', cls: 'scatter' });
+assert.equal(pc.alive, false, 'still has to wait out the respawn delay');
+pc.respawnAt = 0;
+say(room, c, { t: 'spawn', cls: 'scatter' });
+assert.equal(pc.alive, true); assert.equal(pc.cls, 'scatter');
 
 // --- leaving ----------------------------------------------------------------------------------
 room.close(a);

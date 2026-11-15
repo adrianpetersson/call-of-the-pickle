@@ -125,7 +125,7 @@
 
       <div class="pane hidden" data-pane="loadout">
         <h2>Loadout</h2>
-        <div id="classes" class="classes" role="radiogroup" aria-label="Loadout"></div>
+        <div id="lobbycar"></div>
       </div>
 
       <div class="pane hidden" data-pane="pickle">
@@ -189,36 +189,46 @@
     </footer>
   </div>
 
-  <!-- pause -->
+  <!-- in-game menu -->
   <div id="pause" class="screen hidden">
     <div class="shade dark"></div>
     <div class="sheet">
-      <div class="sheethead">
-        <div>
-          <div class="eyebrow">Room</div>
-          <div class="code" id="pausecode"></div>
+      <header class="sheethead">
+        <div class="sheettitle"><b>Call of the Pickle</b><span>Paused</span></div>
+        <div class="roomtag"><span>Room</span><b id="pausecode"></b></div>
+      </header>
+      <nav class="tabs ptabs" role="tablist" aria-label="Menu sections">
+        <button type="button" role="tab" data-ptab="loadout" aria-selected="true">Loadout</button>
+        <button type="button" role="tab" data-ptab="settings" aria-selected="false">Settings</button>
+        <button type="button" role="tab" data-ptab="room" aria-selected="false">Room</button>
+      </nav>
+
+      <div class="ppane" data-ppane="loadout">
+        <div id="pausecar"></div>
+        <button id="redeploy" class="ghost full" type="button">Respawn now with this loadout <span>counts as a death</span></button>
+        <p class="note centre">Otherwise your pick applies on your next life. Arrow keys work too.</p>
+      </div>
+
+      <div class="ppane hidden" data-ppane="settings">
+        <label class="slider"><span>Mouse sensitivity</span><input id="sens" type="range" min="0.3" max="3" step="0.05" /><output id="sensv"></output></label>
+        <label class="slider"><span>Volume</span><input id="vol" type="range" min="0" max="1" step="0.05" /><output id="volv"></output></label>
+        <label class="slider"><span>Field of view</span><input id="fov" type="range" min="60" max="105" step="1" /><output id="fovv"></output></label>
+      </div>
+
+      <div class="ppane hidden" data-ppane="room">
+        <button id="pausecopy" class="ghost full" type="button">Copy invite link</button>
+        <div id="hostbox">
+          <h3>Room rules <span>you opened this room</span></h3>
+          <div class="seg" id="hostMode"></div>
+          <div class="seg" id="hostMap"></div>
+          <div class="seg" id="hostDur"></div>
+          <button id="hostapply" class="ghost full" type="button">Start a new round with these rules</button>
         </div>
-        <button id="pausecopy" class="ghost" type="button">Copy invite link</button>
-      </div>
-      <button id="resume" class="primary" type="button">Back to the fight</button>
-
-      <h3>Loadout <span>applies on your next life</span></h3>
-      <div id="pauseclasses" class="seg wide"></div>
-
-      <h3>Settings</h3>
-      <label class="slider"><span>Mouse sensitivity</span><input id="sens" type="range" min="0.3" max="3" step="0.05" /><output id="sensv"></output></label>
-      <label class="slider"><span>Volume</span><input id="vol" type="range" min="0" max="1" step="0.05" /><output id="volv"></output></label>
-      <label class="slider"><span>Field of view</span><input id="fov" type="range" min="60" max="105" step="1" /><output id="fovv"></output></label>
-
-      <div id="hostbox">
-        <h3>Room rules <span>you opened this room</span></h3>
-        <div class="seg" id="hostMode"></div>
-        <div class="seg" id="hostMap"></div>
-        <div class="seg" id="hostDur"></div>
-        <button id="hostapply" class="ghost full" type="button">Start a new round with these rules</button>
+        <p class="note" id="guestnote">Whoever opened the room sets the mode, arena and round length.</p>
+        <button id="leave" class="ghost danger full" type="button">Leave room</button>
       </div>
 
-      <button id="leave" class="ghost danger full" type="button">Leave room</button>
+      <button id="resume" class="deploy" type="button"><span class="d1">Back to the fight</span></button>
     </div>
   </div>
 

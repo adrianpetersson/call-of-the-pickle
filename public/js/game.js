@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { MAPS, CY, LOBBY, LOBBY_PERIOD } from '../shared/maps.js';
 import {
-  PLAYER, WEAPONS, CLASSES, COLORS, TEAM_COLORS, TEAM_NAMES, MAX_HP, MAX_GRENADES, RESPAWN_MS, MODES,
+  PLAYER, AIM, WEAPONS, CLASSES, COLORS, TEAM_COLORS, TEAM_NAMES, MAX_HP, MAX_GRENADES, RESPAWN_MS, MODES,
 } from '../shared/config.js';
 import { World } from './world.js';
 import { part, models } from './assets.js';
@@ -105,7 +105,7 @@ export class Game {
     this.lastSend = 0; this.lastSent = '';
     this.nextCls = settings.cls;
     this.me = {
-      id: 0, alive: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), yaw: 0, pitch: 0, recoil: 0,
+      id: 0, alive: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), yaw: 0, pitch: 0, recoil: 0, recoilYaw: 0, burst: 0, lastShot: 0,
       onGround: false, hp: 0, cls: settings.cls, weapons: [], cur: 0, grenades: 0, bloom: 0, scopeT: 0,
       stepOff: 0, bobPhase: 0, stepDist: 0, swapEnd: 0, nadeAt: 0, respawnAt: 0, spawnAskAt: 0, shield: false,
       deathPos: new THREE.Vector3(),
@@ -260,6 +260,9 @@ export class Game {
       default: break;
     }
   }
+
+  // give up this life and come back with the loadout picked in the menu
+  redeploy() { if (this.inRoom && this.me.alive && this.phase === 'play') this.net?.send({ t: 'redeploy' }); }
 
   setClass(id) {
     this.nextCls = id; this.settings.cls = id;
@@ -465,7 +468,9 @@ export class Game {
     if (killer) killer.k = m.kk;
     if (victim) { victim.d = m.vd; victim.a = 0; victim.hp = 0; }
     const wname = WEAPONS[m.w]?.name ?? '';
-    if (killer && victim) {
+    const redeploy = m.w === 'redeploy';
+    if (redeploy && victim) this.hud.feedNote(`${victim.n} redeployed`);
+    else if (killer && victim) {
       this.hud.feedKill(m.k === m.v ? null : killer.n, this.cssOf(killer), victim.n, this.cssOf(victim), wname, !!m.h, m.k === me.id || m.v === me.id);
     }
     if (m.v === me.id) {
@@ -474,7 +479,7 @@ export class Game {
       this.fx.shards(me.pos, this.vmTint.color.getHex(), 22);
       va.copy(me.pos); va.y += 0.8; this.fx.burst(va, 26, 0x9be38a, 6, 0, 0.5, 0, 0.6);
       this.sound.play('die');
-      this.hud.showDeath({ killer: m.k === m.v ? null : killer?.n, css: killer ? this.cssOf(killer) : '#fff', weapon: wname, head: !!m.h, cls: this.nextCls });
+      this.hud.showDeath({ killer: m.k === m.v ? null : killer?.n, css: killer ? this.cssOf(killer) : '#fff', weapon: wname, head: !!m.h, cls: this.nextCls, redeploy });
     } else {
       const r = this.remotes.get(m.v);
       if (r) {
@@ -537,7 +542,7 @@ export class Game {
   spawnMe(p, yaw, cls) {
     const me = this.me;
     me.alive = true; me.pos.set(p[0], p[1], p[2]); me.vel.set(0, 0, 0);
-    me.yaw = yaw; me.pitch = 0; me.recoil = 0; me.hp = MAX_HP; me.cls = cls; me.shield = true;
+    me.yaw = yaw; me.pitch = 0; me.recoil = 0; me.recoilYaw = 0; me.burst = 0; me.hp = MAX_HP; me.cls = cls; me.shield = true;
     me.weapons = [this.mkWeapon(cls), this.mkWeapon('sidearm')]; me.cur = 0; me.grenades = 1;
     me.bloom = 0; me.scopeT = 0; me.stepOff = 0; me.swapEnd = 0; me.onGround = false;
     this.lastSent = '';
@@ -573,9 +578,9 @@ export class Game {
   }
 
   aim() {
-    const me = this.me, p = me.pitch + me.recoil, cp = Math.cos(p);
-    fwd.set(-Math.sin(me.yaw) * cp, Math.sin(p), -Math.cos(me.yaw) * cp);
-    right.set(Math.cos(me.yaw), 0, -Math.sin(me.yaw));
+    const me = this.me, p = me.pitch + me.recoil, yaw = me.yaw + me.recoilYaw, cp = Math.cos(p);
+    fwd.set(-Math.sin(yaw) * cp, Math.sin(p), -Math.cos(yaw) * cp);
+    right.set(Math.cos(yaw), 0, -Math.sin(yaw));
     up.crossVectors(right, fwd);
   }
 
@@ -584,9 +589,9 @@ export class Game {
     const moving = Math.hypot(me.vel.x, me.vel.z) / PLAYER.speed;
     if (d.pellets > 1) return d.spread;
     if (d.scope && me.scopeT > 0.9) return d.scopedSpread + moving * 0.012 + (me.onGround ? 0 : 0.03);
-    let s = (d.spread + me.bloom) * (1 + moving * 0.7);
-    if (!me.onGround) s *= 1.7;
-    return s * lerp(1, 0.6, me.scopeT);
+    let s = (d.spread + me.bloom) * (1 + moving * AIM.movePenalty);
+    if (!me.onGround) s *= AIM.airPenalty;
+    return s * lerp(1, AIM.aimBonus, me.scopeT);
   }
 
   // closest thing along a ray: world or an enemy bot
@@ -648,7 +653,11 @@ export class Game {
       this.net?.send({ t: 'fire', w: w.id, o: [r2(muzzle.x), r2(muzzle.y), r2(muzzle.z)], e: ends });
       for (const [to, h] of hits) this.net?.send({ t: 'hit', to, d: Math.max(1, Math.round(h.d)), w: w.id, h: h.h });
     }
-    me.recoil += d.kick * (0.75 + Math.random() * 0.5);
+    // recoil: mostly a steady climb, plus a sideways sway that follows the same S-curve every burst
+    if (now - me.lastShot > 320) me.burst = 0;
+    me.lastShot = now; me.burst++;
+    me.recoil = Math.min(d.kick * AIM.kickCap, me.recoil + d.kick * (0.88 + Math.random() * 0.24));
+    me.recoilYaw += d.kick * (d.side ?? 0.2) * (Math.sin(me.burst * 0.75) + (Math.random() - 0.5) * 0.3);
     me.bloom = Math.min(d.maxBloom, me.bloom + d.bloom);
     return true;
   }
@@ -692,8 +701,11 @@ export class Game {
       if (me.stepDist > 2.4) { me.stepDist = 0; this.sound.play('step', 0.5); }
     }
     me.stepOff *= Math.exp(-14 * dt);
-    me.recoil *= Math.exp(-9 * dt);
-    me.bloom *= Math.exp(-6 * dt);
+    if (now - me.lastShot > AIM.settleDelay) {
+      const fade = Math.exp(-AIM.recoilFade * dt);
+      me.recoil *= fade; me.recoilYaw *= fade;
+      me.bloom *= Math.exp(-AIM.bloomFade * dt);
+    }
 
     // weapon handling
     if (w.reloadEnd && now >= w.reloadEnd) {
@@ -825,6 +837,7 @@ export class Game {
     this.boom(e, def.radius, p.kind);
     this.net?.send({ t: 'ex', k: p.kind, pid: p.pid, p: [r2(e.x), r2(e.y), r2(e.z)] });
     const splash = (id, c, self) => {
+      if (p.directId === id && def.direct) { this.net?.send({ t: 'hit', to: id, d: def.direct, w: p.kind }); return; }   // struck by the jar itself
       vc.subVectors(c, e);
       const dist = vc.length();
       if (dist > def.radius) return;
@@ -874,7 +887,7 @@ export class Game {
           for (const r of this.remotes.values()) {
             if (!r.alive || !r.bot.group.visible || this.isMate(r.id)) continue;
             const tb = rayBox(p.pos, p.dir, r.pos.x - HALF - 0.1, r.pos.y - 0.05, r.pos.z - HALF - 0.1, r.pos.x + HALF + 0.1, r.pos.y + PLAYER.height + 0.1, r.pos.z + HALF + 0.1, t);
-            if (tb >= 0 && tb <= t) { t = tb; hit = true; }
+            if (tb >= 0 && tb <= t) { t = tb; hit = true; p.directId = r.id; }
           }
           if (hit || now - p.born > 4000) { p.pos.addScaledVector(p.dir, Math.max(0, t - 0.08)); this.explodeMine(p); done = true; }
           else p.pos.addScaledVector(p.dir, step);
@@ -964,7 +977,7 @@ export class Game {
         this.zoomNow = lerp(1, w.def.zoom, me.scopeT);
         const bob = me.onGround ? Math.sin(me.bobPhase * 2) * 0.022 * Math.min(1, Math.hypot(me.vel.x, me.vel.z) / PLAYER.speed) : 0;
         cam.position.set(me.pos.x, me.pos.y + PLAYER.eye - me.stepOff + bob, me.pos.z);
-        cam.rotation.set(me.pitch + me.recoil, me.yaw, 0);
+        cam.rotation.set(me.pitch + me.recoil, me.yaw + me.recoilYaw, 0);
         this.setFov((2 * Math.atan(Math.tan((this.settings.fov * Math.PI) / 360) / this.zoomNow) * 180) / Math.PI);
         this.updateViewModel(dt, now, w);
       } else {
