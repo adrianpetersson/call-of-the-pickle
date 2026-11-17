@@ -70,9 +70,10 @@ class Model:
             self.mats.append(m)
         return self.mats.index(m)
 
-    def _commit(self, tb, m, loc=(0, 0, 0), rot=(0, 0, 0), scale=(1, 1, 1), smooth=True):
+    def _commit(self, tb, m, loc=(0, 0, 0), rot=(0, 0, 0), scale=(1, 1, 1), smooth=True, recalc=True):
         M = Matrix.Translation(loc) @ Euler(rot).to_matrix().to_4x4() @ Matrix.Diagonal((scale[0], scale[1], scale[2], 1))
-        bmesh.ops.recalc_face_normals(tb, faces=tb.faces[:])
+        if recalc:
+            bmesh.ops.recalc_face_normals(tb, faces=tb.faces[:])
         bmesh.ops.transform(tb, matrix=M, verts=tb.verts[:])
         idx = self._mi(m)
         for f in tb.faces:
@@ -146,8 +147,8 @@ class Model:
             bmesh.ops.rotate(tb, cent=(0, 0, 0), matrix=Matrix.Rotation(math.pi / 2, 3, 'Y'), verts=tb.verts[:])
         self._commit(tb, m, loc, rot, scale)
 
-    def raw(self, tb, m, loc=(0, 0, 0), rot=(0, 0, 0), scale=(1, 1, 1)):
-        self._commit(tb, m, loc, rot, scale)
+    def raw(self, tb, m, loc=(0, 0, 0), rot=(0, 0, 0), scale=(1, 1, 1), recalc=True):
+        self._commit(tb, m, loc, rot, scale, recalc=recalc)
 
     def finish(self, sharp=38):
         me = bpy.data.meshes.new(self.name)
@@ -879,6 +880,529 @@ def build_blocks():
 
 
 BUILDERS['blocks'] = build_blocks
+
+
+# ------------------------------------------------------------------------------------------
+# Christmas (xmas.glb): the props and kit blocks of the holiday arena, and the Santa hat every
+# fighter wears there. Same conventions as the props above: origin at the base centre, front -Y.
+# ------------------------------------------------------------------------------------------
+def sweep_bm(pts, radii, segs=12, key=None, caps=(True, True), step=0.04):
+    """A tube along `pts` with one radius per point. `key(s, angle)` sorts the faces into
+    separate bmeshes (stripes); returns {key: bmesh}. Faces are wound outward, so pass
+    recalc=False to Model.raw for the open stripe pieces."""
+    pts = [Vector(p) for p in pts]
+    if key and step:                                       # resample finely so stripe edges stay smooth
+        fine, frad = [pts[0]], [radii[0]]
+        for i in range(1, len(pts)):
+            k = max(1, int(math.ceil((pts[i] - pts[i - 1]).length / step)))
+            for j in range(1, k + 1):
+                fine.append(pts[i - 1].lerp(pts[i], j / k)); frad.append(radii[i - 1] + (radii[i] - radii[i - 1]) * j / k)
+        pts, radii = fine, frad
+    n = len(pts)
+    T = [(pts[min(i + 1, n - 1)] - pts[max(i - 1, 0)]).normalized() for i in range(n)]
+    up = Vector((0, 0, 1)) if abs(T[0].z) < 0.9 else Vector((1, 0, 0))
+    N = [(up - T[0] * up.dot(T[0])).normalized()]
+    for i in range(1, n):
+        N.append((N[-1] - T[i] * N[-1].dot(T[i])).normalized())
+    s = [0.0]
+    for i in range(1, n):
+        s.append(s[-1] + (pts[i] - pts[i - 1]).length)
+    tb = bmesh.new()
+    rings = []
+    for i in range(n):
+        Bv = T[i].cross(N[i])
+        rings.append([tb.verts.new(pts[i] + radii[i] * (math.cos(2 * math.pi * j / segs) * N[i] + math.sin(2 * math.pi * j / segs) * Bv))
+                      for j in range(segs)])
+    keys = []
+    for i in range(n - 1):
+        for j in range(segs):
+            k = (j + 1) % segs
+            tb.faces.new((rings[i][j], rings[i][k], rings[i + 1][k], rings[i + 1][j]))
+            keys.append(key((s[i] + s[i + 1]) / 2, 2 * math.pi * (j + 0.5) / segs) if key else 0)
+    if caps[0] and radii[0] > 1e-5:
+        tb.faces.new(list(reversed(rings[0])))
+        keys.append(keys[0])
+    if caps[1] and radii[-1] > 1e-5:
+        tb.faces.new(rings[-1])
+        keys.append(keys[-segs - (1 if caps[0] and radii[0] > 1e-5 else 0)])
+    out = {}
+    for kv in sorted(set(keys)):
+        c = tb.copy()
+        c.faces.ensure_lookup_table()
+        bmesh.ops.delete(c, geom=[c.faces[i] for i, kk in enumerate(keys) if kk != kv], context='FACES')
+        bmesh.ops.delete(c, geom=[v for v in c.verts if not v.link_faces], context='VERTS')
+        out[kv] = c
+    tb.free()
+    return out
+
+
+def add_sweep(m, mats, pts, radii, segs=12, key=None, caps=(True, True), loc=(0, 0, 0), rot=(0, 0, 0), scale=(1, 1, 1)):
+    for k, tb in sweep_bm(pts, radii, segs, key, caps).items():
+        m.raw(tb, mats[k], loc=loc, rot=rot, scale=scale, recalc=False)
+
+
+def helix_key(pitch, n=2):
+    return lambda s, a: int(math.floor((s / pitch + a / (2 * math.pi)) * n)) % n
+
+
+def star_bm(r_out, r_in, depth, points=5):
+    """A chunky star facing -Y, centred on the origin."""
+    tb = bmesh.new()
+    cf, cb = tb.verts.new((0, -depth / 2, 0)), tb.verts.new((0, depth / 2, 0))
+    ring_f, ring_b = [], []
+    for i in range(points * 2):
+        a = math.pi / 2 + i * math.pi / points
+        r = r_out if i % 2 == 0 else r_in
+        ring_f.append(tb.verts.new((r * math.cos(a), -depth * 0.18, r * math.sin(a))))
+        ring_b.append(tb.verts.new((r * math.cos(a), depth * 0.18, r * math.sin(a))))
+    k = len(ring_f)
+    for i in range(k):
+        j = (i + 1) % k
+        tb.faces.new((cf, ring_f[j], ring_f[i]))
+        tb.faces.new((cb, ring_b[i], ring_b[j]))
+        tb.faces.new((ring_f[i], ring_f[j], ring_b[j], ring_b[i]))
+    return tb
+
+
+def tier_bm(z0, z1, r, segs=14, droop=0.1, jag=0.8, turn=0.0):
+    """One layer of a fir: a cone whose rim zigzags in and out, the outer points hanging lower."""
+    tb = bmesh.new()
+    top = tb.verts.new((0, 0, z1))
+    under = tb.verts.new((0, 0, z0 + (z1 - z0) * 0.18))
+    rim = []
+    for j in range(segs):
+        a = 2 * math.pi * j / segs + turn
+        rr, zz = (r, z0 - droop) if j % 2 == 0 else (r * jag, z0)
+        rim.append(tb.verts.new((rr * math.cos(a), rr * math.sin(a), zz)))
+    for j in range(segs):
+        k = (j + 1) % segs
+        tb.faces.new((rim[j], rim[k], top))
+        tb.faces.new((rim[k], rim[j], under))
+    return tb
+
+
+def fir(m, tiers, mats, rnd, ornaments=20, lights=40, turns=4.0, orn_r=0.07, bulb_r=0.035):
+    """tiers: [(z0, z1, r), ...] bottom to top. Adds the cones, baubles and a spiral of fairy lights."""
+    pine, pine2 = mats['pine'], mats['pine2']
+    for i, (z0, z1, r) in enumerate(tiers):
+        turn = i * 0.4
+        segs = 14 if r < 1.5 else 18
+        m.raw(tier_bm(z0, z1, r, segs=segs, droop=r * 0.12, turn=turn), pine if i % 2 == 0 else pine2)
+
+    def env(z):
+        best = 0.0
+        for (z0, z1, r) in tiers:
+            if z0 - 0.05 <= z <= z1:
+                best = max(best, r * (z1 - z) / (z1 - z0))
+        return best
+
+    zb, zt = tiers[0][0] + 0.1, tiers[-1][1] - 0.25
+    orn = mats['orn']
+    for i in range(ornaments):
+        z = rnd.uniform(zb, zt - 0.2)
+        a = rnd.uniform(0, 2 * math.pi)
+        rr = env(z) * 0.86
+        rad = orn_r * rnd.uniform(0.85, 1.25)
+        p = (rr * math.cos(a), rr * math.sin(a), z - rad * 0.4)
+        m.sphere(rad, p, orn[i % len(orn)], u=10, v=7)
+        m.cyl(rad * 0.3, rad * 0.35, (p[0], p[1], p[2] + rad * 1.05), mats['gold'], axis='Z', segs=6, bevel=0)
+    bulbs = mats['bulbs']
+    for i in range(lights):
+        u = (i + 0.5) / lights
+        z = zb + u * (zt - zb)
+        a = u * turns * 2 * math.pi
+        rr = env(z) * 0.93 + bulb_r * 0.5
+        m.sphere(bulb_r, (rr * math.cos(a), rr * math.sin(a), z), bulbs[i % len(bulbs)], scale=(1, 1, 1.3), u=6, v=4)
+
+
+def santa_hat(m, red, fur, base_r, height, loc=(0, 0, 0), flop=1.0, segs=14, tilt=(0, 0, 0)):
+    """Fur brim, a red cone that flops over toward +Y (the back) and a pompom on the tip."""
+    pts, radii = [], []
+    p = Vector((0, 0, 0))
+    n = 12
+    step = height / n
+    for i in range(n + 1):
+        t = i / n
+        pts.append(p.copy())
+        radii.append(max(base_r * 0.06, base_r * (1 - t) ** 0.85))
+        th = flop * 2.1 * t ** 2.2
+        p += Vector((0, math.sin(th), math.cos(th))) * step
+    add_sweep(m, [red], pts, radii, segs=segs, rot=tilt, loc=loc)
+    M = Matrix.Translation(loc) @ Euler(tilt).to_matrix().to_4x4()
+    tip = M @ pts[-1]
+    m.sphere(base_r * 0.3, tuple(tip), fur, u=10, v=7)
+    m.torus(base_r * 1.02, base_r * 0.24, loc, fur, axis='Z', segs=segs + 6, tube=8, scale=(1, 1, 1.15), rot=tilt)
+
+
+def bow(m, ribbon, size, loc):
+    x, y, z = loc
+    for sg in (-1, 1):
+        m.torus(size * 0.42, size * 0.12, (x + sg * size * 0.42, y, z + size * 0.3), ribbon, axis='Y', segs=14, tube=6,
+                scale=(1, 0.75, 0.62), rot=(0, sg * math.radians(-28), 0))
+        m.box((size * 0.16, size * 0.05, size * 0.62), (x + sg * size * 0.24, y - size * 0.06, z - size * 0.02), ribbon,
+              rot=(0, sg * math.radians(32), 0), bevel=0)
+    m.sphere(size * 0.17, (x, y, z + size * 0.08), ribbon, u=8, v=6)
+
+
+def gift(name, W, H, wrap, ribbon, pattern=None, pat=None, bow_scale=1.0):
+    m = Model(name)
+    lid = min(0.24, H * 0.15)
+    body = W - 0.05
+    m.box((body, body, H - lid), (0, 0, (H - lid) / 2), wrap, bevel=0.012)
+    m.box((W, W, lid), (0, 0, H - lid / 2), wrap, bevel=0.02)
+    rw, t = max(0.1, W * 0.15), 0.014
+    for sg in (-1, 1):
+        m.box((rw, t, H - lid), (0, sg * (body / 2 + t / 2), (H - lid) / 2), ribbon, bevel=0)
+        m.box((t, rw, H - lid), (sg * (body / 2 + t / 2), 0, (H - lid) / 2), ribbon, bevel=0)
+        m.box((rw, t, lid), (0, sg * (W / 2 + t / 2), H - lid / 2), ribbon, bevel=0)
+        m.box((t, rw, lid), (sg * (W / 2 + t / 2), 0, H - lid / 2), ribbon, bevel=0)
+    m.box((rw, W + 2 * t, t), (0, 0, H + t / 2), ribbon, bevel=0)
+    m.box((W + 2 * t, rw, t), (0, 0, H + t / 2), ribbon, bevel=0)
+    if pattern:
+        face = body / 2 + 0.006
+        for side in range(4):
+            a = side * math.pi / 2
+            ca, sa = math.cos(a), math.sin(a)
+            if pattern == 'dots':
+                cols = max(2, int(body / 0.32))
+                rows = max(2, int((H - lid) / 0.32))
+                for i in range(cols):
+                    u = -body / 2 + (i + 0.5) * body / cols
+                    if abs(u) < rw * 0.9:
+                        continue
+                    for k in range(rows):
+                        v = (k + 0.5) * (H - lid) / rows + (0.06 if i % 2 else -0.06)
+                        r = min(0.07, body * 0.05)
+                        px, py = ca * u + sa * face, sa * u - ca * face
+                        m.cyl(r, 0.012, (px, py, v), pat, axis='Y', segs=10, bevel=0, rot=(0, 0, a))
+            elif pattern == 'stripes':
+                n = max(3, int(body / 0.22))
+                for i in range(n):
+                    u = -body / 2 + (i + 0.5) * body / n
+                    if abs(u) < rw * 0.8:
+                        continue
+                    px, py = ca * u + sa * face, sa * u - ca * face
+                    m.box((min(0.06, body * 0.05), 0.012, H - lid - 0.02), (px, py, (H - lid) / 2), pat, rot=(0, 0, a), bevel=0)
+    bow(m, ribbon, min(0.5, W * 0.3) * bow_scale, (0, 0, H + 0.02))
+    return m.finish(sharp=40)
+
+
+def build_xmas():
+    R = math.radians
+    red = mat("XRed", 0xd0263a, 0.6); fur = mat("XFur", 0xfbf8f2, 0.95)
+    gold = mat("XGold", 0xf2c14e, 0.35); star = mat("XStar", 0xffd75a, 0.3, emit=3.0)
+    pine = mat("XPine", 0x1d6a3c, 0.75); pine2 = mat("XPine2", 0x2a8549, 0.75)
+    bark = mat("XBark", 0x6b4426, 0.85); snow = mat("XSnow", 0xf4f8ff, 0.9)
+    coal = mat("XCoal", 0x1b1b22, 0.6); carrot = mat("XCarrot", 0xf07a1e, 0.6)
+    green = mat("XGreen", 0x1f7a45, 0.6); white = mat("XWhite", 0xf6f2ea, 0.55)
+    blue = mat("XBlue", 0x3a6fd6, 0.55); purple = mat("XPurple", 0x8b4fd0, 0.55)
+    goldwrap = mat("XGoldWrap", 0xf0b83a, 0.45); silver = mat("XSilver", 0xd9dee8, 0.25)
+    orn = [mat("XOrnRed", 0xe02f3f, 0.2), mat("XOrnGold", 0xf5c242, 0.2), mat("XOrnBlue", 0x3d78f0, 0.2), silver, mat("XOrnPurple", 0xa65ae0, 0.2)]
+    bulbs = [mat("XBulbWarm", 0xffe2a0, 0.4, emit=4.0), mat("XBulbRed", 0xff4a4a, 0.4, emit=4.0), mat("XBulbGreen", 0x4aff7a, 0.4, emit=4.0),
+             mat("XBulbBlue", 0x5aa0ff, 0.4, emit=4.0), mat("XBulbYellow", 0xffd84a, 0.4, emit=4.0)]
+    sleigh = mat("XSleigh", 0xc21d2a, 0.45); sleigh_d = mat("XSleighDark", 0x5a0f16, 0.6)
+    cushion = mat("XCushion", 0x1e6b45, 0.8); sack = mat("XSack", 0x9a6b3c, 0.9); steel_d = mat("XIron", 0x2e3340, 0.5)
+    ginger = mat("XGinger", 0xb0672c, 0.8); icing = mat("XIcing", 0xfffaf2, 0.5)
+    gum_r = mat("XGumRed", 0xe8304a, 0.35); gum_g = mat("XGumGreen", 0x38c060, 0.35)
+    warm = mat("XLampGlow", 0xffd98a, 0.4, emit=4.0)
+    text_y = mat("XSignText", 0xffe9a8, 0.5, emit=1.6)
+    fmats = {'pine': pine, 'pine2': pine2, 'snow': snow, 'orn': orn, 'gold': gold, 'bulbs': bulbs}
+    made = []
+
+    # ---- the Santa hat every fighter wears on this map (sized for the pickle's head) ----
+    m = Model("SantaHat")
+    santa_hat(m, red, fur, 0.215, 0.5, flop=1.0)
+    made.append(m.finish(sharp=60))
+
+    # ---- a bigger hat for pillar tops and the giant scenery ----
+    m = Model("SantaHatBig")
+    santa_hat(m, red, fur, 0.5, 1.15, flop=1.05, segs=18)
+    made.append(m.finish(sharp=60))
+
+    # ---- giant centre tree (stands on the plaza, ~10 m to the star) ----
+    rnd = random.Random(12)
+    m = Model("TreeBig")
+    m.cyl(0.55, 1.2, (0, 0, 0.6), bark, axis='Z', segs=12, bevel=0.02)
+    m.lathe([(0.0, 0.0), (3.2, 0.0), (3.2, 0.04), (0.0, 0.04)], (0, 0, 0), red, axis='Z', segs=28)             # tree skirt
+    m.torus(3.2, 0.09, (0, 0, 0.04), fur, axis='Z', segs=40, tube=8, scale=(1, 1, 0.8))
+    fir(m, [(0.9, 3.4, 3.2), (2.4, 4.9, 2.65), (3.8, 6.2, 2.1), (5.1, 7.4, 1.6), (6.3, 8.4, 1.1), (7.4, 9.3, 0.62)], fmats, rnd,
+        ornaments=70, lights=150, turns=7.0, orn_r=0.17, bulb_r=0.075)
+    m.raw(star_bm(0.62, 0.27, 0.22), star, loc=(0, 0, 9.75))
+    m.cyl(0.06, 0.5, (0, 0, 9.3), gold, axis='Z', segs=8, bevel=0)
+    made.append(m.finish(sharp=45))
+
+    # ---- regular tree (2 x 2 cells, 3.6 m) ----
+    rnd = random.Random(4)
+    m = Model("Tree")
+    m.cyl(0.16, 0.5, (0, 0, 0.25), bark, axis='Z', segs=10, bevel=0.01)
+    for i in range(6):                                                                             # snow round the foot
+        a = i / 6 * 2 * math.pi
+        m.sphere(0.28, (0.45 * math.cos(a), 0.45 * math.sin(a), 0.02), snow, scale=(1.3, 1.3, 0.35), u=8, v=5)
+    fir(m, [(0.4, 1.55, 0.98), (1.1, 2.3, 0.8), (1.8, 2.95, 0.6), (2.45, 3.4, 0.38)], fmats, rnd, ornaments=18, lights=36, turns=4.5)
+    m.raw(star_bm(0.2, 0.09, 0.08), star, loc=(0, 0, 3.55))
+    made.append(m.finish(sharp=45))
+
+    # ---- presents: three sizes, five wrappings. Gift1 is 1x1 cells and 1 m, Gift2 2x2 and
+    #      1.5 m, Gift3 3x3 and 2.5 m, so they stack into climbable steps. ----
+    wraps = {
+        'Red': (red, gold, None, None),
+        'Green': (green, red, 'stripes', white),
+        'Blue': (blue, silver, 'dots', white),
+        'Gold': (goldwrap, red, None, None),
+        'White': (white, green, 'dots', red),
+        'Purple': (purple, gold, 'stripes', gold),
+    }
+    for size, (W, H) in (("Gift1", (0.96, 1.0)), ("Gift2", (1.94, 1.5)), ("Gift3", (2.92, 2.5))):
+        for wn, (wr, rb, pt, pm) in wraps.items():
+            made.append(gift(f"{size}_{wn}", W, H, wr, rb, pt, pm))
+    # small loose gifts, dressing only
+    for wn, (wr, rb, pt, pm) in wraps.items():
+        made.append(gift(f"GiftSmall_{wn}", 0.45, 0.36, wr, rb, None, None, bow_scale=0.9))
+
+    # ---- snowman wearing a Santa hat (1 x 1 cells, 2 m) ----
+    m = Model("Snowman")
+    for r, z in ((0.47, 0.42), (0.35, 1.1), (0.25, 1.6)):
+        m.sphere(r, (0, 0, z), snow, scale=(1, 1, 0.93), u=18, v=12)
+    for i in range(3):
+        m.sphere(0.04, (0, -0.35 + abs(i - 1) * 0.02 - 0.01, 0.98 + i * 0.13), coal, u=8, v=6)
+    for sx in (-1, 1):
+        m.sphere(0.033, (sx * 0.09, -0.225, 1.67), coal, u=8, v=6)
+        add_sweep(m, [bark], [(sx * 0.3, 0, 1.18), (sx * 0.55, -0.02, 1.32), (sx * 0.78, 0.0, 1.5)], [0.026, 0.022, 0.016], segs=6)
+        add_sweep(m, [bark], [(sx * 0.62, -0.01, 1.4), (sx * 0.7, -0.01, 1.58)], [0.015, 0.01], segs=5)
+    for i in range(5):
+        a = math.radians(200 + i * 35)
+        m.sphere(0.018, (0.13 * math.cos(a), -0.2 + 0.13 * math.sin(a) * 0.3, 1.52 + 0.06 * math.sin(a)), coal, u=6, v=4)
+    m.lathe([(0.045, 0.0), (0.0, 0.26)], (0, -0.23, 1.6), carrot, axis='Y', segs=10, rot=(R(180), 0, 0))
+    m.torus(0.25, 0.065, (0, 0, 1.39), red, axis='Z', segs=20, tube=8, scale=(1, 1, 0.9))
+    m.box((0.12, 0.05, 0.38), (0.12, -0.27, 1.2), red, rot=(R(-8), R(10), 0), bevel=0.02)
+    for i in range(3):
+        m.box((0.125, 0.055, 0.025), (0.12 + 0.03 * math.sin(R(10)), -0.274, 1.06 + i * 0.05), green, rot=(R(-8), R(10), 0), bevel=0)
+    santa_hat(m, red, fur, 0.2, 0.48, loc=(0, 0.02, 1.78), tilt=(R(8), R(-10), 0))
+    made.append(m.finish(sharp=50))
+
+    # ---- giant candy cane (1 x 1 cells, 3 m), hook toward -X ----
+    m = Model("CandyCane")
+    H, Rh, rc = 2.55, 0.32, 0.11
+    pts = [(0, 0, z) for z in [0.0, 0.4, 0.8, 1.2, 1.6, 2.0, 2.3, H]]
+    for i in range(1, 15):
+        th = math.pi * i / 14
+        pts.append((-Rh + Rh * math.cos(th), 0, H + Rh * math.sin(th)))
+    pts.append((-2 * Rh, 0, H - 0.18))
+    add_sweep(m, [white, red], pts, [rc] * len(pts), segs=20, key=helix_key(0.42, 2))
+    m.lathe([(0.0, 0.0), (0.24, 0.0), (0.24, 0.05), (0.0, 0.05)], (0, 0, 0), snow, axis='Z', segs=12)
+    made.append(m.finish(sharp=60))
+
+    # ---- Christmas lamp post: candy-striped pole, lantern, holly ring ----
+    m = Model("XmasLamp")
+    m.cyl(0.14, 0.12, (0, 0, 0.06), steel_d, axis='Z', segs=10, bevel=0.02)
+    add_sweep(m, [white, red], [(0, 0, 0.1), (0, 0, 1.2), (0, 0, 2.3), (0, 0, 2.5)], [0.05] * 4, segs=16, key=helix_key(0.3, 2))
+    m.box((0.3, 0.3, 0.05), (0, 0, 2.52), steel_d, bevel=0.012)
+    m.sphere(0.12, (0, 0, 2.7), warm, scale=(1, 1, 1.25), u=10, v=8)
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            m.box((0.025, 0.025, 0.32), (sx * 0.12, sy * 0.12, 2.7), steel_d, bevel=0)
+    m.lathe([(0.0, 2.86), (0.2, 2.86), (0.0, 3.04)], (0, 0, 0), steel_d, axis='Z', segs=4, rot=(0, 0, R(45)))
+    m.torus(0.17, 0.06, (0, 0, 1.9), pine2, axis='Z', segs=16, tube=6)
+    for i in range(5):
+        a = i / 5 * 2 * math.pi
+        m.sphere(0.03, (0.2 * math.cos(a), 0.2 * math.sin(a), 1.95), orn[0], u=6, v=4)
+    bow(m, red, 0.22, (0, -0.22, 1.86))
+    made.append(m.finish(sharp=45))
+
+    # ---- wreath for the walls (faces -Y, centred on its origin) ----
+    rnd = random.Random(8)
+    m = Model("Wreath")
+    m.torus(0.5, 0.15, (0, 0, 0), pine, axis='Y', segs=22, tube=8, scale=(1, 0.8, 1))
+    for i in range(22):
+        a = i / 22 * 2 * math.pi
+        rr = 0.5 + rnd.uniform(-0.08, 0.08)
+        m.sphere(0.1, (rr * math.cos(a), -0.06, rr * math.sin(a)), pine2 if i % 2 else pine, scale=(1.3, 0.6, 0.8), u=6, v=4, rot=(0, -a, 0))
+    for i in range(9):
+        a = rnd.uniform(0, 2 * math.pi)
+        rr = 0.5 + rnd.uniform(-0.1, 0.1)
+        m.sphere(0.045, (rr * math.cos(a), -0.14, rr * math.sin(a)), orn[0] if i % 3 else orn[1], u=6, v=4)
+    bow(m, red, 0.3, (0, -0.15, -0.52))
+    made.append(m.finish(sharp=50))
+
+    # ---- garland swag for the walls: 4 m wide, hangs from its two ends at z=0 ----
+    m = Model("Garland")
+    pts, radii = [], []
+    for i in range(33):
+        x = -2 + 4 * i / 32
+        pts.append((x, 0, -0.5 * (1 - (x / 2) ** 2)))
+        radii.append(0.11 if i % 2 else 0.135)
+    add_sweep(m, [pine], pts, radii, segs=8)
+    for i in range(1, 12):
+        x = -2 + 4 * i / 12
+        z = -0.5 * (1 - (x / 2) ** 2)
+        m.sphere(0.05, (x, -0.1, z - 0.13), bulbs[i % len(bulbs)], scale=(1, 1, 1.4), u=6, v=5)
+    for sx in (-1, 1):
+        bow(m, red, 0.24, (sx * 2, -0.1, -0.06))
+    made.append(m.finish(sharp=50))
+
+    # ---- "MERRY PICKLEMAS" wall sign ----
+    m = Model("SignXmas")
+    w = 5.0
+    m.box((w, 0.1, 1.15), (0, 0, 0), sleigh, bevel=0.04)
+    for z in (0.49, -0.49):
+        m.box((w - 0.16, 0.02, 0.05), (0, -0.055, z), gold, bevel=0.01)
+    for sx in (-1, 1):
+        m.box((0.05, 0.02, 0.93), (sx * (w / 2 - 0.105), -0.055, 0), gold, bevel=0.01)
+    for i in range(14):
+        x = -w / 2 + (i + 0.5) * w / 14
+        m.sphere(0.13, (x, -0.01, 0.6), snow, scale=(1.6, 0.9, 0.55), u=8, v=5)
+    for sx in (-1, 1):
+        for k in range(3):
+            a = R(90 + 120 * k)
+            m.sphere(0.13, (sx * (w / 2 - 0.42) + 0.13 * math.cos(a), -0.09, 0.13 * math.sin(a)), pine2, scale=(1.4, 0.3, 0.7), u=8, v=5, rot=(0, -a, 0))
+        for k in range(3):
+            m.sphere(0.05, (sx * (w / 2 - 0.42) + (k - 1) * 0.05, -0.13, 0.02 + (k % 2) * 0.05), orn[0], u=6, v=5)
+    tb = text_bm("MERRY PICKLEMAS", size=0.42, extrude=0.025)
+    m.flat = True
+    m.raw(tb, text_y, loc=(0, -0.07, -0.02), rot=(R(90), 0, 0))
+    m.flat = False
+    made.append(m.finish(sharp=45))
+
+    # ---- Santa's sleigh: 2 x 4 cells, 1.5 m, long along Y with the curl at -Y ----
+    m = Model("Sleigh")
+    for sx in (-1, 1):                                                                   # runners
+        pts = [(sx * 0.72, 1.75, 0.18), (sx * 0.72, 1.8, 0.07), (sx * 0.72, 1.6, 0.04)]
+        pts += [(sx * 0.72, y, 0.04) for y in (1.0, 0.0, -1.0, -1.45)]
+        for i in range(1, 12):
+            th = math.pi * 1.25 * i / 11
+            pts.append((sx * 0.72, -1.45 - 0.42 * math.sin(th), 0.46 - 0.42 * math.cos(th)))
+        add_sweep(m, [gold], pts, [0.045] * len(pts), segs=8)
+        for y in (-0.9, 0.0, 0.9):
+            m.box((0.05, 0.05, 0.42), (sx * 0.72, y, 0.27), steel_d, bevel=0.01)
+    m.box((1.62, 2.7, 0.62), (0, 0.15, 0.77), sleigh, bevel=0.08)                          # tub
+    m.box((1.5, 0.4, 0.75), (0, -1.25, 1.0), sleigh, rot=(R(-28), 0, 0), bevel=0.07)      # dash
+    m.box((1.62, 0.3, 1.25), (0, 1.38, 1.0), sleigh, rot=(R(10), 0, 0), bevel=0.08)        # backrest
+    for sx in (-1, 1):
+        add_sweep(m, [sleigh], [(sx * 0.76, -1.45, 1.38), (sx * 0.8, -1.7, 1.42), (sx * 0.8, -1.82, 1.25), (sx * 0.78, -1.7, 1.12)], [0.09, 0.08, 0.06, 0.04], segs=10)
+        m.box((0.035, 2.7, 0.05), (sx * 0.82, 0.15, 1.08), gold, bevel=0.01)
+        m.box((0.035, 2.4, 0.05), (sx * 0.82, 0.15, 0.6), gold, bevel=0.01)
+        m.sphere(0.12, (sx * 0.82, 0.15, 0.82), gold, scale=(0.25, 1, 1), u=10, v=8)
+    m.box((1.5, 0.95, 0.16), (0, 0.75, 1.13), cushion, bevel=0.06)                          # seat
+    m.box((1.4, 0.18, 0.7), (0, 1.2, 1.55), cushion, rot=(R(10), 0, 0), bevel=0.06)
+    m.sphere(0.48, (0.05, -0.3, 1.3), sack, scale=(1.25, 1.0, 0.95), u=14, v=10)             # sack of presents
+    m.sphere(0.12, (0.05, -0.3, 1.78), sack, scale=(1, 1, 1.4), u=8, v=6)
+    m.torus(0.1, 0.03, (0.05, -0.3, 1.7), gold, axis='Z', segs=12, tube=6)
+    for (x, y, z, s, rz, w2) in ((-0.42, -0.85, 1.25, 0.34, 0.3, 'Red'), (0.45, -0.75, 1.3, 0.3, -0.4, 'Blue'), (-0.35, 0.1, 1.38, 0.28, 0.8, 'Gold')):
+        wr, rb = wraps[w2][0], wraps[w2][1]
+        m.box((s, s, s), (x, y, z), wr, rot=(0, 0, rz), bevel=0.01)
+        m.box((s * 0.2, s + 0.01, s + 0.01), (x, y, z), rb, rot=(0, 0, rz), bevel=0)
+        m.box((s + 0.01, s * 0.2, s + 0.01), (x, y, z), rb, rot=(0, 0, rz), bevel=0)
+    for sx in (-1, 1):                                                                       # sleigh bells
+        m.sphere(0.07, (sx * 0.84, -1.3, 1.2), gold, u=8, v=6)
+    made.append(m.finish(sharp=40))
+
+    # ---- snow pile, dressing only (walk-through) ----
+    rnd = random.Random(6)
+    m = Model("SnowPile")
+    for i in range(6):
+        a = rnd.uniform(0, 2 * math.pi); d = rnd.uniform(0, 0.4)
+        m.sphere(rnd.uniform(0.25, 0.42), (d * math.cos(a), d * math.sin(a), 0), snow, scale=(1.3, 1.1, 0.5), u=10, v=6)
+    made.append(m.finish(sharp=60))
+
+    # ---- gingerbread man (giant scenery), faces -Y, feet at z=0, ~1.6 m tall ----
+    m = Model("Gingerbread")
+    sq = (1, 0.55, 1)
+    m.sphere(0.34, (0, 0, 1.3), ginger, scale=(1, 0.5, 1), u=16, v=10)
+    add_sweep(m, [ginger], [(0, 0, 0.55), (0, 0, 0.75), (0, 0, 0.95)], [0.3, 0.33, 0.3], segs=16, scale=sq)
+    for sx in (-1, 1):
+        add_sweep(m, [ginger], [(sx * 0.15, 0, 0.98), (sx * 0.45, 0, 1.04), (sx * 0.66, 0, 1.12)], [0.15, 0.14, 0.13], segs=12, scale=sq)
+        m.sphere(0.13, (sx * 0.66, 0, 1.12), ginger, scale=sq, u=10, v=8)
+        add_sweep(m, [ginger], [(sx * 0.12, 0, 0.6), (sx * 0.22, 0, 0.32), (sx * 0.3, 0, 0.12)], [0.17, 0.16, 0.15], segs=12, scale=sq)
+        m.sphere(0.15, (sx * 0.3, 0, 0.12), ginger, scale=sq, u=10, v=8)
+        # icing zigzags across the wrist (runs up and down) and the ankle (runs side to side)
+        wrist = [(sx * 0.55 + (0.03 if k % 2 else -0.03), -0.09, 0.96 + 0.04 * k) for k in range(7)]
+        ankle = [(sx * 0.26 - 0.12 + 0.04 * k, -0.09, 0.25 + (0.03 if k % 2 else -0.03)) for k in range(7)]
+        for zz in (wrist, ankle):
+            add_sweep(m, [icing], zz, [0.017] * len(zz), segs=6)
+        m.sphere(0.045, (sx * 0.11, -0.16, 1.38), icing, scale=(1, 0.5, 1), u=8, v=6)
+    smile = [(0.13 * math.cos(R(a)), -0.16, 1.25 + 0.09 * math.sin(R(a))) for a in range(200, 345, 15)]
+    add_sweep(m, [icing], smile, [0.018] * len(smile), segs=6)
+    for i, g in enumerate((gum_r, gum_g, gum_r)):
+        m.sphere(0.06, (0, -0.16, 0.92 - i * 0.16), g, scale=(1, 0.6, 0.85), u=10, v=6)
+    made.append(m.finish(sharp=60))
+
+    return made
+
+
+def build_xmas_blocks():
+    """Kit blocks for the holiday arena. Kit* materials are tinted by the game like blocks.glb."""
+    R = math.radians
+    snow = mat("KitSnow", 0xf6f6f6, 0.9)
+    ice = mat("KitIce", 0xf4f4f4, 0.12); ice_s = mat("KitIceShade", 0xc4c4c4, 0.15)
+    gb = mat("KitGinger", 0xf2f2f2, 0.82); gb_s = mat("KitGingerShade", 0xc8c8c8, 0.85)
+    mint = mat("KitMint", 0xf6f6f6, 0.35)
+    icing = mat("FixIcing", 0xfffaf2, 0.5); cred = mat("FixCandyRed", 0xd8283a, 0.35); cgreen = mat("FixGumGreen", 0x2fb35a, 0.35)
+    crack = mat("FixIceCrack", 0xeaf6ff, 0.2)
+    out = []
+    both = lambda kit: ((kit + "_cube", 1.0), (kit + "_slab", 0.5))
+
+    # gingerbread: a biscuit slab with piped icing along the top and a gumdrop on each face
+    for name, H in both("Ginger"):
+        m = Model(name)
+        m.box((0.99, 0.99, H - 0.005), (0, 0, H / 2), gb, bevel=0.03, segs=1)
+        for sg in (-1, 1):
+            m.box((1.0, 0.035, 0.05), (0, sg * 0.49, H - 0.05), icing, bevel=0)
+            m.box((0.035, 1.0, 0.05), (sg * 0.49, 0, H - 0.05), icing, bevel=0)
+            for k in range(4):
+                u = -0.375 + k * 0.25
+                L = 0.1 if k % 2 else 0.16
+                m.box((0.05, 0.03, L), (u, sg * 0.498, H - 0.05 - L / 2), icing, bevel=0)
+                m.box((0.03, 0.05, L), (sg * 0.498, u, H - 0.05 - L / 2), icing, bevel=0)
+        if H == 1.0:
+            for side in range(4):
+                a = side * math.pi / 2
+                m.sphere(0.07, (math.sin(a) * 0.5, -math.cos(a) * 0.5, 0.42), cred if side % 2 else cgreen, scale=(1, 0.55, 0.9), u=6, v=4, rot=(0, 0, a))
+            m.box((0.8, 0.8, 0.012), (0, 0, 0.5), gb_s, bevel=0)
+        out.append(m.finish(sharp=40))
+
+    # snow: soft rounded block with a lumpy top
+    rnd = random.Random(14)
+    for name, H in both("Snow"):
+        m = Model(name)
+        m.box((0.99, 0.99, H - 0.01), (0, 0, H / 2), snow, bevel=0.07, segs=2)
+        m.sphere(rnd.uniform(0.16, 0.22), (rnd.uniform(-0.2, 0.2), rnd.uniform(-0.2, 0.2), H - 0.03), snow, scale=(1.4, 1.2, 0.3), u=8, v=4)
+        out.append(m.finish(sharp=60))
+
+    # ice brick: glossy blocks in staggered courses
+    for name, H in both("Ice"):
+        m = Model(name)
+        m.box((0.95, 0.95, H - 0.02), (0, 0, H / 2), ice_s, bevel=0)
+        n = int(H / 0.5)
+        for k in range(n):
+            if k % 2 == 0:
+                for sx in (-1, 1):
+                    m.box((0.485, 0.985, 0.485), (sx * 0.25, 0, 0.25 + k * 0.5), ice if sx < 0 else ice_s, bevel=0.04, segs=1)
+            else:
+                for sy in (-1, 1):
+                    m.box((0.985, 0.485, 0.485), (0, sy * 0.25, 0.25 + k * 0.5), ice_s if sy < 0 else ice, bevel=0.04, segs=1)
+        out.append(m.finish())
+
+    # peppermint: white candy with red bands
+    for name, H in both("Mint"):
+        m = Model(name)
+        m.box((0.98, 0.98, H - 0.004), (0, 0, H / 2), mint, bevel=0.05, segs=2)
+        for z in ((0.25, 0.75) if H == 1.0 else (0.25,)):
+            m.box((0.995, 0.995, 0.16), (0, 0, z), cred, bevel=0.03, segs=1)
+        out.append(m.finish(sharp=50))
+
+    # floors (top at 0.5)
+    m = Model("FloorSnow")
+    m.box((0.995, 0.995, 0.12), (0, 0, 0.44), snow, bevel=0.03, segs=1)
+    out.append(m.finish(sharp=60))
+    m = Model("FloorIce")
+    m.box((0.995, 0.995, 0.12), (0, 0, 0.44), ice, bevel=0.012, segs=1)
+    m.box((0.6, 0.018, 0.004), (-0.1, 0.12, 0.5), crack, rot=(0, 0, R(28)), bevel=0)
+    m.box((0.3, 0.014, 0.004), (0.22, -0.15, 0.5), crack, rot=(0, 0, R(-50)), bevel=0)
+    out.append(m.finish())
+    return out
+
+
+BUILDERS['xmas'] = lambda: build_xmas() + build_xmas_blocks()
 
 
 def export(objs, path):

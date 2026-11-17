@@ -1,7 +1,7 @@
 # Call of the Pickle
 
-A small browser arena shooter for a team of about ten. Pickle fighters, four loadouts, four
-arenas, free-for-all or two teams. No accounts, no install: everyone opens the same link.
+A small browser arena shooter for a team of about ten. Pickle fighters, four loadouts, five
+arenas (one of them a snowy North Pole for the holidays), free-for-all or two teams. No accounts, no install: everyone opens the same link.
 
 **Play it: https://call-of-the-pickle.call-of-the-pickle.workers.dev**
 
@@ -73,13 +73,16 @@ it tiny and responsive, and is the right trade for a group of colleagues.
 ## Rebuilding the art and sound
 
 - Models: `tools/blender/build_assets.py` builds every model in Blender (fighter, weapons,
-  pickups and the arena props) and exports the `.glb` files in `public/assets/models/`.
+  pickups and the arena props) and exports the `.glb` files in `public/assets/models/`. The
+  holiday set (trees, presents, snowmen, sleigh, Santa hats and the snow, ice, gingerbread and
+  peppermint blocks) is the `xmas` builder and goes to `xmas.glb`.
 - Building blocks: each arena is assembled from kit blocks (brick, stone, crate, container,
   steel platform, planks, can, cheese, cinder block, floor tile, paver). A map's `kit` says which
   block each part uses and `palette` tints it; `public/js/world.js` instances them.
 - Arenas: `public/shared/maps.js`. `b.prop('Barrel', x, z)` places a solid prop (it gets an
   invisible collision box), `b.decor(...)` places decoration, and `scenery` lists the giant
-  kitchen items standing outside the walls.
+  kitchen items standing outside the walls. A map with `hats: true` puts a Santa hat on every
+  fighter and `snow: true` makes it snow.
 - Balance: all weapon numbers live in `public/shared/config.js`; `node tools/balance.js` prints
   shots-to-kill and time-to-kill at several ranges so changes can be checked against numbers.
 - Sound: `tools/build_sfx.sh <sonniss dir> <kenney dir>` cuts the clips in `public/assets/sfx/`

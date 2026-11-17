@@ -10,7 +10,12 @@ const F = 1, W = 2, P = 3, S = 4, C = 5, A = 6, B = 7, T = 8, L = 9, C2 = 10;
 // An invisible solid cell: gives a prop (barrel, stall, vat...) collision without drawing a block.
 export const COLLIDER = 255;
 // Footprint and height of each solid prop, in cells: [wide, deep, half-units tall]
-const PROP_SIZE = { Barrel: [1, 1, 2], JarBig: [1, 1, 3], Crate: [1, 1, 1], Stall: [2, 1, 2], Vat: [2, 2, 3] };
+const PROP_SIZE = {
+  Barrel: [1, 1, 2], JarBig: [1, 1, 3], Crate: [1, 1, 1], Stall: [2, 1, 2], Vat: [2, 2, 3],
+  // holiday set; presents come in several wrappings (Gift2_Red, Gift2_Blue...) sharing one size
+  Tree: [2, 2, 7], Snowman: [1, 1, 4], CandyCane: [1, 1, 6], Sleigh: [2, 4, 3], Gift1: [1, 1, 2], Gift2: [2, 2, 3], Gift3: [3, 3, 5],
+};
+const propSize = (name) => PROP_SIZE[name] ?? PROP_SIZE[name.split('_')[0]];
 
 class Builder {
   constructor(w, d, h) {
@@ -53,7 +58,7 @@ class Builder {
   pickupAt(t, x, z) { this._pickups.push([t, x, z]); }
   // A solid prop standing on whatever is at cell (x,z). rot is in quarter turns; front faces +z at 0.
   prop(name, x, z, quarters = 0) {
-    const [w0, d0, h] = PROP_SIZE[name];
+    const [w0, d0, h] = propSize(name);
     const w = quarters % 2 ? d0 : w0, d = quarters % 2 ? w0 : d0;
     const y = this.standAt(x + 0.5, z + 0.5), cy = Math.round(y / CY);
     this.box(x, z, w, d, cy, cy + h, COLLIDER);
@@ -296,6 +301,110 @@ function brineRig() {
   });
 }
 
+// Christmas: a snowy town square big enough for ten. A giant decorated tree on a raised plaza in
+// the middle, ringed by stacks of presents you can climb; a gingerbread house in each base corner
+// with Santa's sleigh parked outside; a frozen pond, candy-cane pillars wearing Santa hats, a toy
+// deck and a long walkway on each side wall. Fighters wear Santa hats here and it snows.
+// Presents climb in steps: Gift1 tops out at 1 m, Gift2 at 1.5 m, Gift3 at 2.5 m.
+const BIG_TREE = [[0.9, 3.4, 3.2], [2.4, 4.9, 2.65], [3.8, 6.2, 2.1], [5.1, 7.4, 1.6], [6.3, 8.4, 1.1], [7.4, 9.3, 0.62]];  // [bottom, top, radius] per tier, as built in Blender
+function northPole() {
+  const b = new Builder(52, 52, 26);
+  const SN = 11, ICE = 12;
+  b.walls(8, W);
+  b.box(0, 0, 52, 1, 9, 10, SN); b.box(0, 0, 1, 52, 9, 10, SN);             // snow along the wall tops
+
+  // town square: a raised snow plaza, a step all round, and the big tree in the middle
+  b.block(19, 19, 14, 14, 2, P);
+  b.block(18, 19, 1, 14, 1, S); b.block(19, 18, 14, 1, 1, S);
+  for (let y = 3; y < 23; y++) {                                               // the tree's collision: a stepped cone
+    const z = (y - 3 + 0.5) * CY;
+    let r = 0;
+    for (const [z0, z1, rr] of BIG_TREE) if (z >= z0 - 0.4 && z <= z1) r = Math.max(r, rr * Math.min(1, (z1 - z) / (z1 - z0)));
+    r = z < 9.3 ? Math.max(r * 0.8, 0.75) : 0;
+    for (let k = 21; k < 31; k++) for (let i = 21; i < 31; i++) {
+      if (Math.hypot(i + 0.5 - 26, k + 0.5 - 26) <= r) b.raw(i, k, 1, 1, y, y + 1, COLLIDER);
+    }
+  }
+  b.decor('TreeBig', 26, 1.5, 26, 0, false);
+  ['Red', 'Blue', 'Gold', 'Green', 'White', 'Purple', 'Red', 'Gold'].forEach((wrap, i) => {
+    const a = i / 8 * Math.PI * 2 + 0.3;
+    b.decor(`GiftSmall_${wrap}`, 26 + Math.cos(a) * 2.1, 1.5, 26 + Math.sin(a) * 2.1, a, false);
+  });
+  // present stacks on the plaza: a climb to a high perch in one corner, low cover elsewhere
+  b.prop('Gift1_Red', 27, 19); b.prop('Gift2_Green', 28, 19); b.prop('Gift3_Blue', 30, 19);
+  b.prop('Gift2_Red', 20, 20); b.prop('Gift1_Gold', 22, 20);
+  b.prop('Gift1_Purple', 20, 25); b.prop('Gift1_White', 20, 26);
+  b.prop('CandyCane', 18, 18); b.prop('CandyCane', 33, 18, 1);
+
+  // gingerbread house in the base corner: two doors, a snowy roof, a peppermint chimney
+  b.block(3, 3, 11, 1, 5, T); b.block(3, 3, 1, 8, 5, T);
+  b.block(3, 10, 4, 1, 5, T); b.block(10, 10, 4, 1, 5, T);
+  b.block(13, 3, 1, 2, 5, T); b.block(13, 8, 1, 3, 5, T);
+  b.slab(3, 3, 11, 8, 6, SN);
+  b.block(10, 4, 1, 1, 9, A);
+  // presents stacked up to the roof, and the sleigh parked by the door
+  b.prop('Gift3_Red', 4, 11); b.prop('Gift2_White', 7, 12); b.prop('Gift1_Green', 9, 13);
+  b.prop('Sleigh', 16, 3); b.prop('Gift1_Gold', 16, 7);
+
+  // the yard: trees, snowmen, a frozen pond, a toy deck with a candy silo, a present pyramid
+  b.prop('Tree', 10, 16); b.prop('Tree', 24, 7); b.prop('Tree', 37, 11); b.prop('Tree', 44, 21); b.prop('Tree', 5, 22);
+  b.prop('Snowman', 16, 13); b.prop('Snowman', 31, 13); b.prop('Snowman', 40, 7);
+  b.box(28, 3, 9, 6, 0, 1, ICE);
+  b.block(42, 2, 8, 5, 4, T);
+  b.stairs(39, 3, 1, 0, 3, 2, S);
+  b.block(44, 6, 3, 1, 6, L);
+  b.block(46, 8, 2, 2, 12, A);
+  b.prop('Gift3_Purple', 13, 20); b.prop('Gift2_Gold', 16, 21); b.prop('Gift1_Blue', 16, 23);
+  b.prop('Sleigh', 36, 22, 1);
+  // walkway along the side wall, with stairs at both ends and a snow parapet
+  b.block(1, 16, 2, 20, 4, T);
+  b.stairs(1, 13, 0, 1, 3, 2, S);
+  b.stairs(1, 38, 0, -1, 3, 2, S);
+  b.block(1, 24, 1, 3, 6, L);
+  // low snow walls for crossing the open ground, and candy pillars as landmarks
+  b.block(20, 13, 5, 1, 3, L); b.block(35, 14, 1, 4, 3, L); b.block(11, 26, 4, 1, 2, L); b.block(27, 12, 4, 1, 2, L);
+  b.block(8, 28, 1, 1, 10, A); b.block(22, 2, 1, 1, 10, A);
+
+  for (const [x, z] of [[5, 5], [8, 5], [11, 8], [5, 8], [15, 1], [20, 3], [2, 11], [11, 12], [22, 10], [27, 1], [19, 7], [7, 17]]) b.spawn(x, z);
+  b.pickup('hp', 22, 23); b.pickup('ammo', 31, 20);
+  b.pickup('hp', 2, 25); b.pickup('ammo', 45, 4); b.pickup('ammo', 8, 7);
+  b.pickup('hp', 33, 10); b.pickup('ammo', 14, 21); b.pickup('hp', 20, 11);
+
+  // dressing
+  b.decor('SignXmas', 26, 3.3, 1.07, 0);
+  for (const [x, y] of [[19, 3.4], [33, 3.4], [45, 3.6]]) b.decor('Wreath', x, y, 1.07, 0);
+  b.decor('Wreath', 1.07, 3.4, 10.5, HALF_PI); b.decor('Wreath', 1.07, 3.4, 40, HALF_PI);
+  for (const x of [7, 16, 38]) b.decor('Garland', x, 4.4, 1.12, 0);
+  b.decor('Garland', 1.12, 4.4, 6, HALF_PI); b.decor('Garland', 1.12, 4.4, 44, HALF_PI);
+  b.decor('Wreath', 5, 1.9, 11.07, 0); b.decor('Wreath', 14.07, 1.9, 9.4, HALF_PI);
+  b.decor('Garland', 8.5, 3.0, 11.1, 0); b.decor('Garland', 14.1, 3.0, 6.5, HALF_PI);
+  for (const [x, z] of [[10.5, 4.5], [47, 9], [8.5, 28.5], [22.5, 2.5]]) b.decor('SantaHatBig', x, b.standAt(x, z), z, 0.4);
+  for (const [x, z] of [[19.5, 19.5], [32.5, 22.5], [14.5, 11.5], [27.5, 2.5], [42.5, 6.5], [2.6, 30.5]]) b.decor('XmasLamp', x, b.standAt(x, z), z, 0);
+  for (const [x, z] of [[21.5, 5.5], [39.5, 16.5], [25.5, 15.5], [12.5, 1.8], [47.5, 13.5], [33, 1.8], [3.5, 18.5]]) b.decor('SnowPile', x, b.standAt(x, z), z, x);
+  b.decor('GiftSmall_Red', 11.6, 0.5, 5.4, 0.3); b.decor('GiftSmall_Blue', 12.2, 0.5, 6.1, -0.4);
+  return b.finish({
+    id: 'xmas', name: 'North Pole',
+    kit: { [F]: 'FloorSnow', [W]: 'Ice', [P]: 'Snow', [S]: 'Snow', [C]: 'Mint', [A]: 'Mint', [B]: 'Ginger', [T]: 'Ginger', [L]: 'Snow', [C2]: 'Ice', [SN]: 'Snow', [ICE]: 'FloorIce' },
+    palette: { [F]: 0xeef2f8, [W]: 0xa9cfe8, [P]: 0xf3f6fb, [S]: 0xe4ebf5, [C]: 0xf6f3ee, [A]: 0xf6f3ee, [B]: 0xb8692f, [T]: 0xb8692f, [L]: 0xeaf0f7, [C2]: 0x9fc8e6, [SN]: 0xf7f9fc, [ICE]: 0x9fd2f0 },
+    floorAlt: 0xe3eaf4,
+    ground: 0xd5deea,
+    sky: { top: 0x1c2a5c, bottom: 0xd9b8d4, fog: 0xc2c8e2, sun: 0xffe6cc, ambient: 0xb7c6ee },
+    snow: true, hats: true,
+    scenery: [
+      { m: 'Gingerbread', x: -9, y: 0.46, z: 16, s: 8, rot: HALF_PI }, { m: 'Gingerbread', x: 61, y: 0.46, z: 36, s: 8, rot: -HALF_PI },
+      { m: 'SantaHatBig', x: 26, y: 0.46, z: -10, s: 8, rot: 0.3 }, { m: 'SantaHatBig', x: 22, y: 0.46, z: 62, s: 7, rot: 2.6 },
+      { m: 'Tree', x: -9, y: 0.46, z: 40, s: 4, rot: 0 }, { m: 'Tree', x: 61, y: 0.46, z: 8, s: 4.5, rot: 1 },
+      { m: 'Tree', x: 42, y: 0.46, z: -9, s: 3.5, rot: 2 }, { m: 'Tree', x: 8, y: 0.46, z: 61, s: 4, rot: 3 },
+      { m: 'Gift3_Red', x: -8, y: 0.46, z: 3, s: 2.5, rot: 0.3 }, { m: 'Gift2_Blue', x: 59, y: 0.46, z: 49, s: 3, rot: 0.7 },
+      { m: 'Gift3_Green', x: 37, y: 0.46, z: 61, s: 2.4, rot: -0.4 }, { m: 'Gift3_Gold', x: 12, y: 0.46, z: -9, s: 2.2, rot: 0.9 },
+      { m: 'CandyCane', x: 4, y: 0.46, z: -7, s: 5, rot: 0.5 }, { m: 'CandyCane', x: 47, y: 0.46, z: 59, s: 5, rot: 2 },
+      { m: 'Snowman', x: 60, y: 0.46, z: 22, s: 5, rot: -HALF_PI },
+      { m: 'Pickle', x: -7, y: 0.46, z: 28, s: 7, rot: HALF_PI, c: 2 }, { m: 'Pickle', x: 31, y: 0.46, z: 60, s: 7, rot: Math.PI, c: 5 },
+      { m: 'Pickle', x: 59, y: 0.46, z: 12, s: 6.5, rot: -HALF_PI, c: 8 },
+    ],
+  });
+}
+
 // The lobby backdrop: an alley that repeats every LOBBY_PERIOD cells, so the menu camera can walk
 // down it forever. Never played in.
 export const LOBBY_PERIOD = 16;
@@ -324,4 +433,4 @@ function lobbyAlley() {
 }
 export const LOBBY = lobbyAlley();
 
-export const MAPS = [foundry(), switchyard(), scrapPit(), brineRig()];
+export const MAPS = [foundry(), switchyard(), scrapPit(), brineRig(), northPole()];

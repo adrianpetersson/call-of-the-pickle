@@ -6,7 +6,7 @@ import {
   PLAYER, AIM, WEAPONS, CLASSES, COLORS, TEAM_COLORS, TEAM_NAMES, MAX_HP, MAX_GRENADES, RESPAWN_MS, MODES,
 } from '../shared/config.js';
 import { World } from './world.js';
-import { part, models } from './assets.js';
+import { part, models, propFile } from './assets.js';
 import { Bot, makeGun, makeGrenadeMesh, makeRocketMesh, makePickup, makeTint } from './avatar.js';
 import { FX } from './fx.js';
 
@@ -148,7 +148,7 @@ export class Game {
     this.mapIdx = idx;
     this.world = new World(map);
     this.fx.world = this.world;
-    this.worldMesh = this.world.buildBlocks(models.blocks);
+    this.worldMesh = this.world.buildBlocks(models.blocks, models.xmas);
     this.scene.add(this.worldMesh);
     const sky = map.sky;
     this.sky.material.uniforms.top.value.setHex(sky.top);
@@ -163,7 +163,10 @@ export class Game {
     sc.left = -half; sc.right = half; sc.top = half; sc.bottom = -half; sc.near = 1; sc.far = 140;
     sc.updateProjectionMatrix();
     this.renderer.shadowMap.needsUpdate = true;
-    this.ground.material.color.setHex(map.palette[1]).multiplyScalar(0.55);
+    this.ground.material.color.setHex(map.ground ?? map.palette[1]).multiplyScalar(map.ground ? 1 : 0.55);
+    this.hats = !!map.hats;
+    for (const r of this.remotes.values()) r.bot.setHat(this.hats);
+    this.setSnow(map.snow ? map : null);
 
     map.pickups.forEach((def) => {
       const g = makePickup(def.t);
@@ -183,8 +186,9 @@ export class Game {
       if (p.m === 'Pickle') {
         const fan = new Bot();
         fan.setColor(COLORS[p.c ?? 0]); fan.tag.visible = false; fan.animate(0, 0, 0.1, true);
+        fan.setHat(map.hats);
         o = fan.group;
-      } else o = part('props', p.m);
+      } else o = part(propFile(p.m), p.m);
       o.position.set(p.x, p.y, p.z);
       o.rotation.set(p.tilt ?? 0, p.rot ?? 0, 0, 'YXZ');
       o.scale.setScalar(p.s ?? 1);
@@ -192,6 +196,48 @@ export class Game {
       this.scene.add(o);
       this.propMeshes.push(o);
     }
+  }
+
+  // Falling snow: a box of flakes over the arena that drift down and wrap round to the top.
+  setSnow(map) {
+    if (this.snow) { this.scene.remove(this.snow); this.snow.geometry.dispose(); this.snow = null; }
+    if (!map) return;
+    const n = 3000, pad = 8, top = 22;
+    const pos = new Float32Array(n * 3), spd = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      pos[i * 3] = -pad + Math.random() * (map.w + 2 * pad);
+      pos[i * 3 + 1] = Math.random() * top;
+      pos[i * 3 + 2] = -pad + Math.random() * (map.d + 2 * pad);
+      spd[i] = 0.7 + Math.random() * 0.8;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    if (!this.flakeTex) {
+      const c = document.createElement('canvas'); c.width = c.height = 32;
+      const x = c.getContext('2d'), gr = x.createRadialGradient(16, 16, 0, 16, 16, 16);
+      gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.5, 'rgba(255,255,255,0.8)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+      x.fillStyle = gr; x.fillRect(0, 0, 32, 32);
+      this.flakeTex = new THREE.CanvasTexture(c);
+    }
+    this.snow = new THREE.Points(geo, new THREE.PointsMaterial({ size: 0.12, map: this.flakeTex, transparent: true, depthWrite: false, color: 0xffffff }));
+    this.snow.frustumCulled = false;
+    this.snow.userData = { spd, top, t: 0 };
+    this.scene.add(this.snow);
+  }
+
+  updateSnow(dt) {
+    const s = this.snow;
+    if (!s) return;
+    const a = s.geometry.attributes.position, p = a.array, { spd, top } = s.userData;
+    const t = (s.userData.t += dt);
+    for (let i = 0, n = spd.length; i < n; i++) {
+      const k = i * 3;
+      p[k + 1] -= spd[i] * dt;
+      p[k] += Math.sin(t * 0.8 + i) * 0.25 * dt;
+      p[k + 2] += Math.cos(t * 0.6 + i * 1.7) * 0.2 * dt;
+      if (p[k + 1] < 0.4) p[k + 1] += top;
+    }
+    a.needsUpdate = true;
   }
 
   setPreview(colorIdx, cls) {
@@ -347,6 +393,7 @@ export class Game {
     this.scene.add(bot.group, shadow);
     r = { id, bot, shadow, buf: [], pos: new THREE.Vector3(), yaw: 0, pitch: 0, slot: 0, fl: 0, alive: false, speed: 0 };
     this.remotes.set(id, r);
+    bot.setHat(this.hats);
     this.styleRemote(r);
     return r;
   }
@@ -1009,6 +1056,7 @@ export class Game {
     }
 
     this.fx.update(dt);
+    this.updateSnow(dt);
     this.sky.position.copy(cam.position);
     this.renderer.clear();
     this.renderer.render(this.scene, cam);

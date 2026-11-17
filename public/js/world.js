@@ -68,9 +68,10 @@ export class World {
     return out;
   }
 
-  // Assemble the arena from kit blocks. `kitModels` is the loaded blocks.glb scene; map.kit says
-  // which block style each palette slot uses and map.palette tints it.
-  buildBlocks(kitModels) {
+  // Assemble the arena from kit blocks. `kitModels` is the loaded blocks.glb scene (`extraKit`
+  // another file of blocks, such as the holiday set); map.kit says which block style each palette
+  // slot uses and map.palette tints it.
+  buildBlocks(kitModels, extraKit) {
     const { w, d, h, cells, map } = this;
     const at = (x, y, z) => cells[(y * d + z) * w + x];
     const filled = (x, y, z) => {
@@ -100,7 +101,7 @@ export class World {
           if (show) {
             const name = floor ? kit : `${kit}_${cube ? 'cube' : 'slab'}`;
             const hash = (x * 73856093) ^ (yy * 19349663) ^ (z * 83492791);
-            const alt = floor && ((x + z) & 1);
+            const alt = floor && c === 1 && ((x + z) & 1);   // checker on the main floor only
             color.setHex(alt && map.floorAlt != null ? map.floorAlt : map.palette[c] ?? 0x888888);
             const lift = 0.88 + 0.12 * Math.min(1, yy / 6);                 // lower blocks sit a touch darker
             const jitter = 0.93 + ((hash >>> 3) % 16) / 16 * 0.12;
@@ -120,7 +121,7 @@ export class World {
     const up = new THREE.Vector3(0, 1, 0);
     let tris = 0;
     for (const [name, list] of lists) {
-      const src = kitModels.getObjectByName(name);
+      const src = kitModels.getObjectByName(name) ?? extraKit?.getObjectByName(name);
       if (!src) continue;
       src.traverse((mesh) => {
         if (!mesh.isMesh) return;

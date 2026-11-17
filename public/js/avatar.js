@@ -82,6 +82,19 @@ export class Bot {
 
   setColor(hex) { this.tint.color.setHex(hex); }
 
+  // a Santa hat on the head (the holiday map); it rides on the body so it sways with it
+  setHat(on) {
+    if (!on) { if (this.hat) this.hat.visible = false; return; }
+    if (!this.hat) {
+      this.hat = part('xmas', 'SantaHat');
+      this.hat.position.set(0, 1.4, 0.01);
+      this.hat.rotation.set(-0.1, 0.3, 0.08);
+      this.hat.scale.setScalar(1.12);
+      this.body.add(this.hat);
+    }
+    this.hat.visible = true;
+  }
+
   setName(text, cssColor = '#ffffff') {
     const key = text + cssColor;
     if (this._tagKey === key) return;

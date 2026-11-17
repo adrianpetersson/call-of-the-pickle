@@ -1,7 +1,7 @@
 // Loads the Blender-made models (see tools/blender/build_assets.py) once at boot.
 import { GLTFLoader } from '../vendor/loaders/GLTFLoader.js';
 
-const FILES = ['pickle', 'rattler', 'scatter', 'longshot', 'thumper', 'sidearm', 'jar', 'bomb', 'pickups', 'props', 'blocks'];
+const FILES = ['pickle', 'rattler', 'scatter', 'longshot', 'thumper', 'sidearm', 'jar', 'bomb', 'pickups', 'props', 'blocks', 'xmas'];
 export const models = {};
 
 export async function loadModels() {
@@ -16,6 +16,11 @@ export async function loadModels() {
     });
     models[name] = gltf.scene;
   }));
+}
+
+// Which model file holds a named prop (the holiday set lives in its own file).
+export function propFile(name) {
+  return models.props.getObjectByName(name) ? 'props' : 'xmas';
 }
 
 // A copy of one named object from a model file, placed at the origin.
